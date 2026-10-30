@@ -1,3 +1,4 @@
 /target/
 /docs/plans/attachments/**
+!/docs/plans/attachments/**/
 !/docs/plans/attachments/**/*.md

@@ -1,0 +1,10 @@
+[package]
+name = "auto-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+auto-web-contract = { path = "../auto-web-contract", version = "=0.1.0" }
+auto-lang-core = { path = "../../../auto-lang/crates/auto-lang-core" }
+auto-generation-core = { path = "../../../auto-lang/crates/auto-generation-core", version = "=0.1.0" }
