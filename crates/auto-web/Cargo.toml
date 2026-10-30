@@ -8,3 +8,35 @@ license.workspace = true
 auto-web-contract = { path = "../auto-web-contract", version = "=0.1.0" }
 auto-lang-core = { path = "../../../auto-lang/crates/auto-lang-core" }
 auto-generation-core = { path = "../../../auto-lang/crates/auto-generation-core", version = "=0.1.0" }
+
+a2r-std = { path = "../../../auto-lang/crates/a2r-std" }
+auto-val = { path = "../../../auto-lang/crates/auto-val", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["json"] }
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful", "service"] }
+socket2 = "0.5"
+serde_json = "1"
+futures = "0.3"
+lazy_static = "1.4"
+base64 = "0.22"
+sha1 = "0.10"
+
+
+auto-media-core = { path="../../../auto-lang/crates/auto-media-core", default-features=false, features=["image-codec"] }
+
+mime_guess = "2"
+
+serde = {version="1",features=["derive"]}
+toml="0.8"
+regex="1"
+semver="1"
+sha2="0.10"
+
+[features]
+test-http-e2e = ["auto-lang-core/test-http-e2e"]
+
+[dev-dependencies]
+auto-lang-core = { path="../../../auto-lang/crates/auto-lang-core",features=["test-http-e2e"] }
+tempfile="3"
+blake3="1.5"
