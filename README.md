@@ -26,6 +26,20 @@ Tauri IPC remains in `auto-api-gen`; its legacy dispatcher delegates HTTP here.
 
 The central contract is the language main checkout's
 `docs/plans/890-auto-web-independent-repository-delivery.md`.
-Man/UI composition (T-07), formal test-ID/four-owner governance (T-08), independent
-source distribution/recovery (T-09), application acceptance and final review/
-landing remain separate stages. Local package checks do not certify those gates.
+Man/UI composition is wired through the public Web exports. The language
+governance catalog registers `web-unit`, `web-http`, and `web-generation` as
+separate recipes with the original IDs/conditions preserved across their move.
+Independent source distribution/recovery (T-09), application acceptance and final
+review/landing remain pending. Local package checks do not certify those gates.
+
+Run the independent Web tests in this repository:
+
+```text
+cargo nextest run -p auto-web-contract -p auto-web --lib --features auto-web/test-http-e2e
+cargo nextest run -p auto-web --test http_runtime --test http_generation
+```
+
+The Web nextest configuration keeps HTTP processes serial and preserves the
+original full-tier deadlines. Original ignored tests remain explicitly ignored.
+`crates/auto-web/tests/fixtures/885-back` retains the original generator fixture
+bytes; language VM/standard-library boundary fixtures stay with their consumers.

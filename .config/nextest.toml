@@ -1,0 +1,7 @@
+# PLAN-890: preserve full-tier deadlines and isolated HTTP test processes.
+[profile.default]
+test-threads = 1
+
+[profile.default.slow-timeout]
+period = "900s"
+terminate-after = 2

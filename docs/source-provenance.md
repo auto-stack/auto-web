@@ -26,3 +26,18 @@ Original test bodies/assertions/ignore/feature conditions are preserved across
 these owners. Formal old-ID/new-owner execution registration is T-08, not a
 claim inferred from the source move. Source inventory/hashes and candidate pins
 are in the central stage handoff. No remote repository or publication was made.
+
+## Test/resource ownership (T-08)
+
+The language source contracts retain the six original manifest hashes and all
+696 Web-family historical rows (116 distinct IDs). 88 domain test identities
+move to Web; 28 language ABI/lowering/public-facade consumer identities remain
+with their language consumers. The broader namespace migration also preserves
+the Core API/value-conversion tests moved with their HTTP test owner.
+The two originally ignored generation tests keep their exact conditions.
+
+The three `auto-api-gen/tests/fixtures/885-back` source files move to this
+repository's `crates/auto-web/tests/fixtures/885-back`; original SHA-256 values
+are in `web-resource-ownership.json`. The other 14 standard-library/compiler
+boundary inputs stay in the language repository. No old test ID, original
+assertion, or required runtime branch is retired by this ownership accounting.
