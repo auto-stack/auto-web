@@ -48,8 +48,12 @@ def runtime(binary, expected, log, *, vm_source=None):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
+        with socket.socket() as fallback:
+            fallback.bind(('127.0.0.1', 0))
+            fallback_port = fallback.getsockname()[1]
+    assert port != fallback_port
     config = json.dumps({'profile': 'development', 'listen': {'port': port}, 'limits': {'drain_timeout_ms': 100}})
-    env = {**environment(), 'AUTO_HTTP_SERVICE_JSON': config, 'AUTO_HTTP_PORT': str(port),
+    env = {**environment(), 'AUTO_HTTP_SERVICE_JSON': config, 'AUTO_HTTP_PORT': str(fallback_port),
            'AUTO_EXECUTION_ENGINE': 'autovm'}
     args = [str(binary)]
     if vm_source:
@@ -83,6 +87,7 @@ def runtime(binary, expected, log, *, vm_source=None):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', port))
     return {'exact_json': expected, 'shutdown': 202, 'exit': 0, 'port_released': True,
+            'configured_port': port, 'legacy_env_port': fallback_port,
             'binary_sha256': sha(binary), 'log_sha256': sha(log)}
 
 

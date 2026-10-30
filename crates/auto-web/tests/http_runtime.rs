@@ -14,6 +14,15 @@ impl Drop for Child {
 }
 #[test]
 fn installed_host_serves_exact_json_and_control_shutdown_joins() {
+    configured_file_entry("development");
+}
+
+#[test]
+fn configured_proxy_file_entry_enforces_host_policy() {
+    configured_file_entry("proxy_service");
+}
+
+fn configured_file_entry(profile: &str) {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("api.at");
     std::fs::write(
@@ -27,7 +36,19 @@ fn nonce() str { "web-package-runtime-890" }
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let config = dir.path().join("service.json");
-    std::fs::write(&config,format!(r#"{{"profile":"development","listen":{{"port":{port}}},"limits":{{"drain_timeout_ms":100}}}}"#)).unwrap();
+    let fallback = TcpListener::bind("127.0.0.1:0").unwrap();
+    let fallback_port = fallback.local_addr().unwrap().port();
+    assert_ne!(port, fallback_port);
+    let mut settings = serde_json::json!({"profile":profile,"listen":{"addr":"127.0.0.1","port":port},"limits":{"drain_timeout_ms":100}});
+    if profile == "proxy_service" {
+        settings["allowed_hosts"] = serde_json::json!(["only.example"]);
+        settings["auth"] = serde_json::json!({"responsibility":"app"});
+    }
+    let settings = settings.to_string();
+    let resolved = auto_web::contract::resolve_service_config(&settings, None).unwrap();
+    let expected_hash = format!("{:016x}", resolved.effective_config_hash());
+    std::fs::write(&config, settings).unwrap();
+    drop(fallback);
     let mut child = Child(
         Command::new(env!("CARGO_BIN_EXE_auto-web"))
             .args([
@@ -36,7 +57,7 @@ fn nonce() str { "web-package-runtime-890" }
                 "--config",
                 config.to_str().unwrap(),
             ])
-            .env("AUTO_HTTP_PORT", port.to_string())
+            .env("AUTO_HTTP_PORT", fallback_port.to_string())
             .env("AUTO_EXECUTION_ENGINE", "autovm")
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -59,7 +80,7 @@ fn nonce() str { "web-package-runtime-890" }
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
     socket
-        .write_all(b"GET /nonce HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .write_all(b"GET /nonce HTTP/1.1\r\nHost: only.example\r\nConnection: close\r\n\r\n")
         .unwrap();
     let mut response = String::new();
     socket.read_to_string(&mut response).unwrap();
@@ -68,11 +89,29 @@ fn nonce() str { "web-package-runtime-890" }
         response.split_once("\r\n\r\n").unwrap().1,
         "\"web-package-runtime-890\""
     );
+    assert!(
+        TcpStream::connect(("127.0.0.1", fallback_port)).is_err(),
+        "configured service must not bind the environment port"
+    );
+    if profile == "proxy_service" {
+        let mut denied = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        denied
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        denied
+            .write_all(
+                b"GET /nonce HTTP/1.1\r\nHost: untrusted.example\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = String::new();
+        denied.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+    }
     let mut control = TcpStream::connect(("127.0.0.1", port)).unwrap();
     control
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
-    control.write_all(b"POST /__auto/shutdown HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+    control.write_all(b"POST /__auto/shutdown HTTP/1.1\r\nHost: only.example\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     let mut reply = String::new();
     control.read_to_string(&mut reply).unwrap();
     assert!(reply.starts_with("HTTP/1.1 202"), "{reply}");
@@ -88,6 +127,21 @@ fn nonce() str { "web-package-runtime-890" }
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    let mut diagnostics = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut diagnostics)
+        .unwrap();
+    assert!(
+        diagnostics.contains(&format!(
+            "on 127.0.0.1:{port} (profile: {profile}, config_hash: {expected_hash})"
+        )),
+        "{diagnostics}"
+    );
+    assert!(!diagnostics.contains("on 0.0.0.0:"), "{diagnostics}");
     assert!(
         TcpListener::bind(("127.0.0.1", port)).is_ok(),
         "listener retained after owned return"
