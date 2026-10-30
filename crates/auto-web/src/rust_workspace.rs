@@ -4,9 +4,17 @@ use auto_val::AutoResult;
 use std::path::{Path, PathBuf};
 
 fn web_source() -> AutoResult<PathBuf> {
-    let root = std::env::var_os("AUTO_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    let root = if let Some(explicit) = std::env::var_os("AUTO_WEB_ROOT") {
+        PathBuf::from(explicit)
+    } else if let Some(installed) = std::env::current_exe().ok().and_then(|exe| {
+        let parent = exe.parent()?;
+        let sdk = parent.join("sdk");
+        (sdk.exists() || parent.join("install-manifest.json").exists()).then_some(sdk)
+    }) {
+        installed
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    };
     let package = root.join("crates/auto-web");
     if !auto_generation_core::source_owner::valid_source_crate(&package, "auto-web") {
         return Err(format!(
@@ -14,6 +22,34 @@ fn web_source() -> AutoResult<PathBuf> {
             package.display()
         )
         .into());
+    }
+    if auto_generation_core::source_owner::is_managed_sdk(&root) {
+        auto_generation_core::source_owner::validate_installed_service_source(&root)?;
+    }
+    let manifest = std::fs::read_to_string(package.join("Cargo.toml"))?.parse::<toml::Value>()?;
+    let declared = manifest.get("package").and_then(|p| p.get("version"));
+    let version = if let Some(version) = declared.and_then(toml::Value::as_str) {
+        version.to_owned()
+    } else if declared
+        .and_then(|v| v.get("workspace"))
+        .and_then(toml::Value::as_bool)
+        == Some(true)
+    {
+        std::fs::read_to_string(root.join("Cargo.toml"))?
+            .parse::<toml::Value>()?
+            .get("workspace")
+            .and_then(|w| w.get("package"))
+            .and_then(|p| p.get("version"))
+            .and_then(toml::Value::as_str)
+            .ok_or("Web producer version missing")?
+            .to_owned()
+    } else {
+        return Err("Web producer version missing or invalid".into());
+    };
+    if version != "0.1.0" {
+        return Err(
+            format!("Web producer version mismatch: expected 0.1.0, found {version}").into(),
+        );
     }
     auto_generation_core::source_owner::validate_development_dependencies(&package)?;
     Ok(package)

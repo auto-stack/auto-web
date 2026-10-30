@@ -1,0 +1,5 @@
+source_repo = "auto-man"
+source_commit = "cb4ab3dd5d411314cce10b129eeb3b433a11c466"
+source_path = "scripts/man-install.py"
+sha256 = "7172bccb641e8c298b7595df8b913704375f75c7889e1e538bcf2fe303fb1066"
+license_sha256 = "3f34885bf86baa7772f5874d990f36e4ae79857aaba6efa99733cd00f882a676"

@@ -6573,9 +6573,7 @@ pub fn broken(req UploadRequest) UploadReceipt {
             let api_rs = generate_api_rs(&module, None, false, &[]);
             let main_rs = generate_main_rs(&module, None, false, &[], false);
             let types_rs = generate_types_rs(&module);
-            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            // crates/auto-man → 仓库根（ancestors: [auto-man, crates, <root>]）。
-            let repo_root = manifest.join("../../../auto-lang");
+            let repo_root = crate::test_language_root();
             let dir = temp_root("crate");
             let src = dir.join("src");
             std::fs::create_dir_all(&src).unwrap();
@@ -6610,7 +6608,7 @@ path = "src/main.rs"
 [workspace]
 "#,
                     auto_lang_core = repo_root.join("crates/auto-lang-core"),
-                    auto_web = repo_root.parent().unwrap().join("auto-web/crates/auto-web"),
+                    auto_web = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                     auto_media_core = repo_root.join("crates/auto-media-core"),
                     a2r_std = repo_root.join("crates/a2r-std"),
                 ),
@@ -6833,8 +6831,7 @@ pub fn stream() ~Stream<Message> {
             let main_rs = generate_main_rs(&module, Some(DB_AT), false, &[], false);
             let types_rs = generate_types_rs(&module);
             let events_rs = generate_events_rs();
-            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let repo_root = manifest.join("../../../auto-lang");
+            let repo_root = crate::test_language_root();
             let dir = temp_root("crate");
             let src = dir.join("src");
             std::fs::create_dir_all(&src).unwrap();
@@ -6868,7 +6865,7 @@ path = "src/main.rs"
 [workspace]
 "#,
                     repo_root.join("crates/auto-lang-core"),
-                    repo_root.parent().unwrap().join("auto-web/crates/auto-web"),
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                     repo_root.join("crates/auto-media-core"),
                     repo_root.join("crates/a2r-std"),
                 ),
@@ -7173,8 +7170,7 @@ pub fn download(name str) FileResponse {{
             let api_rs = generate_api_rs(&module, None, false, &[]);
             let main_rs = generate_main_rs(&module, None, false, &[], false);
             let types_rs = generate_types_rs(&module);
-            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let repo_root = manifest.join("../../../auto-lang");
+            let repo_root = crate::test_language_root();
             let dir = std::env::temp_dir().join(format!("plan730-crate-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let src = dir.join("src");
@@ -7208,7 +7204,7 @@ path = "src/main.rs"
 [workspace]
 "#,
                     auto_lang_core = repo_root.join("crates/auto-lang-core"),
-                    auto_web = repo_root.parent().unwrap().join("auto-web/crates/auto-web"),
+                    auto_web = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                     auto_media_core = repo_root.join("crates/auto-media-core"),
                     a2r_std = repo_root.join("crates/a2r-std"),
                 ),
@@ -8034,8 +8030,8 @@ pub fn exists(path str) bool { return fsys.path_exists(path) }
     #[test]
     fn test_017_chat_db_rs_has_real_logic_and_fn_names() {
         let _a2r_env = a2r_env_lock();
-        let db_at = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../auto-lang/examples")
+        let db_at = crate::test_language_root()
+            .join("examples")
             .join("ui")
             .join("017-chat")
             .join("src")
@@ -8302,8 +8298,8 @@ pub fn duplicate(id int) Note { return db.clone_note(id) }
     #[test]
     #[ignore]
     fn regen_real_015_backend_db_delegation() {
-        let project = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../auto-lang/examples")
+        let project = crate::test_language_root()
+            .join("examples")
             .join("ui")
             .join("015-notes");
         if !project.exists() {
@@ -8601,7 +8597,9 @@ pub fn list_items() []str { return [] }
 
     #[test]
     fn image_stdlib_codegen_uses_shared_runtime_feature() {
-        let rs_api = include_str!("../../../../auto-lang/stdlib/auto/image.rs.at");
+        let rs_api =
+            std::fs::read_to_string(crate::test_language_root().join("stdlib/auto/image.rs.at"))
+                .unwrap();
         assert!(rs_api.contains("pub fn queue") && rs_api.contains("pub fn stats"));
         let cargo = crate::api_gen::generate_cargo_toml("image-back", false, false);
         assert!(cargo.contains("auto-lang-core = { workspace = true"));

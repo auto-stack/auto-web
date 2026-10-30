@@ -45,6 +45,19 @@ pub use host::{
     install_http_service_host_if_absent, listen_borrowed, serve_owned, WebHttpServiceHost,
 };
 
+#[cfg(test)]
+pub(crate) fn test_language_root() -> std::path::PathBuf {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let combined = manifest.join("../..");
+    let root = if combined.join("crates/auto-lang-core/Cargo.toml").is_file() {
+        combined
+    } else {
+        manifest.join("../../../auto-lang")
+    };
+    assert!(root.join("crates/auto-lang-core/Cargo.toml").is_file());
+    root
+}
+
 #[cfg(all(test, feature = "test-http-e2e"))]
 fn run(code: &str) -> auto_lang_core::AutoResult<String> {
     install_http_service_host_if_absent();

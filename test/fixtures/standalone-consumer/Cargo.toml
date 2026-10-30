@@ -1,0 +1,12 @@
+[package]
+name = "web-standalone-consumer"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+auto-web = { version = "=0.1.0", path = "../../../crates/auto-web" }
+
+[profile.dev]
+debug = "line-tables-only"

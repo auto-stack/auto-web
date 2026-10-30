@@ -984,7 +984,7 @@ mod plan326_tests {
         fn start_example_api_server(example: &str, port: u16) -> u16 {
             clear_http_routes();
             std::env::set_var("AUTO_HTTP_PORT", port.to_string());
-            let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../auto-lang");
+            let repo_root = crate::test_language_root();
             let entry = repo_root
                 .join("examples/ui")
                 .join(example)
@@ -2017,8 +2017,7 @@ fn to_handler() int {
         /// author-from-token) is the verbatim 023 source.
         #[test]
         fn e2e_b1_realworld_token_auth() {
-            let back = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../auto-lang/examples/ui/023-realworld/src/back");
+            let back = crate::test_language_root().join("examples/ui/023-realworld/src/back");
             let api_src = match std::fs::read_to_string(back.join("api.at")) {
                 Ok(s) => s,
                 Err(e) => {

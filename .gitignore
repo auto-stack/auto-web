@@ -1,4 +1,6 @@
 /target/
+__pycache__/
+*.py[cod]
 /docs/plans/attachments/**
 !/docs/plans/attachments/**/
 !/docs/plans/attachments/**/*.md
