@@ -4,3 +4,6 @@ __pycache__/
 /docs/plans/attachments/**
 !/docs/plans/attachments/**/
 !/docs/plans/attachments/**/*.md
+
+# AutoOS 运行时账本目录：specs.json 已迁移 AutoDown（PLAN-107），本地保留只读副本作回滚依据
+.autoos/
