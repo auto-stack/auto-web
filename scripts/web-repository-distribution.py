@@ -315,6 +315,8 @@ def main():
             legacy = json.loads(args.legacy_receipt.read_text())
             if legacy.get('schema') != 'web-legacy-upgrade/1' or legacy.get('outcome') != 'pass':
                 raise ValueError('legal old three-owner upgrade/recovery receipt missing or failed')
+            current = next(r for r in legacy['checks'] if r['id'] == 'new-core-install')
+            receipt['consumer_sources'] = {'auto-man': current['sources']['auto-man']}
             record('legacy-three-owner-recovery', {'receipt': str(args.legacy_receipt), 'sha256': sha(args.legacy_receipt)})
         else:
             receipt['pending'].append('legacy-three-owner-recovery: real old combination receipt required')

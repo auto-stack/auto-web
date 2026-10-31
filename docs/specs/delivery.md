@@ -8,6 +8,9 @@ The version0.1.0 source/Windows payload carries twenty actual SDK packages (incl
 complete stdlib, required fixtures/licenses and the real owner tool artifact.
 Man owns the generic prepare/verify/swap/rollback transaction; Web embeds a
 byte-exact, Git-provenanced immutable artifact, never a separately editable fork.
+That artifact pin identifies the installer script. The rebuilt Man Core CLI has
+its own consumer source pin, archive evidence and current core/package/script/lock
+comparison; the installer pin cannot certify a different CLI revision.
 
 Use `python scripts/web-install.py source|verify-source|install|verify` and
 `scripts/web-repository-distribution.py` according to their public --help. Validate source receipt,
