@@ -263,6 +263,7 @@ dependencies = [
 name = "auto-cache"
 version = "0.1.0"
 dependencies = [
+ "auto-tool-execution",
  "bincode",
  "blake3",
  "chrono",
@@ -434,6 +435,10 @@ version = "0.1.0"
 dependencies = [
  "imara-diff",
 ]
+
+[[package]]
+name = "auto-tool-execution"
+version = "0.1.0"
 
 [[package]]
 name = "auto-val"
