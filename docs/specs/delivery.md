@@ -4,7 +4,7 @@
 
 ## Package and source boundaries
 
-The version0.1.0 source/Windows payload carries nineteen actual SDK packages,
+The version0.1.0 source/Windows payload carries twenty actual SDK packages (including the PLAN-896 auto-tool-execution dependency),
 complete stdlib, required fixtures/licenses and the real owner tool artifact.
 Man owns the generic prepare/verify/swap/rollback transaction; Web embeds a
 byte-exact, Git-provenanced immutable artifact, never a separately editable fork.
