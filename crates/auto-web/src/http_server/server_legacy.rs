@@ -348,7 +348,7 @@ Connection: close
                     // nv_to_json handles string/i32/f64/bool/null, and recognizes
                     // heap object IDs (>= 4_000_000) to expand struct/array/Option
                     // return values into proper JSON instead of bare "null".
-                    nv_to_json(vm, nv, 0)
+                    nv_to_typed_json(vm, nv, api_return_type(&route_match.fn_name).as_deref(), 0)
                 }
                 Err(e) => {
                     eprintln!("[HTTP] Handler '{}' error: {:?}", route_match.fn_name, e);

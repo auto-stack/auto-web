@@ -46,3 +46,9 @@ flag alone is not cleanup evidence. Owned resource completion and service succes
 are reported separately. Original supported arbitrary Windows path limits,
 manual/native requirements and remaining protocol/production gaps do not become
 supported merely because source has moved.
+
+Normal JSON replies use the language-owned typed value converter and the active
+owner's canonical return declaration. Legacy native string lists are decoded only
+under their declared string-list type; ordinary negative integers remain numbers.
+This applies to default transport, ServerHandle and LegacyStdnet. Resource/stream
+dispatch retains priority; middleware short circuits never borrow the handler type.

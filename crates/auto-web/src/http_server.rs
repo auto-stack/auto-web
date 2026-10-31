@@ -32,7 +32,7 @@ pub use auto_lang_core::vm::ffi::http_server::{
     api_param_sigs, api_return_type, capture_program_metadata, clear_api_param_sigs,
     current_program_metadata, fn_is_api_async, fn_is_api_file_return, fn_is_api_upload_return,
     fn_response_kind, format_f64_json, get_routes, has_stream_endpoint, json_escape_string,
-    nv_to_json, push_str_arg, record_api_async_return, record_api_param_sigs,
+    nv_to_json, nv_to_typed_json, push_str_arg, record_api_async_return, record_api_param_sigs,
     record_api_return_shadowed, record_api_return_type, route_declares_upload,
     with_optional_owner_metadata, with_owner_metadata, with_owner_metadata_sync,
     with_program_metadata, HttpProgramMetadata,

@@ -172,7 +172,13 @@ fn serve_inner(vm: &AutoVM, addr: &str, stop: Option<&AtomicBool>) -> Result<(),
                     // Result is on top of stack — decode via shared serializer
                     // (Plan 326 Phase 3: handles struct/array/Option returns).
                     let nv = ht.ram.pop_nv();
-                    crate::vm::ffi::http_server::nv_to_json(vm, nv, 0)
+                    crate::vm::ffi::http_server::nv_to_typed_json(
+                        vm,
+                        nv,
+                        crate::vm::ffi::http_server::api_return_type(&route_match.fn_name)
+                            .as_deref(),
+                        0,
+                    )
                 }
                 Err(e) => {
                     eprintln!("[HTTP] Handler '{}' error: {:?}", route_match.fn_name, e);

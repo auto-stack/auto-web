@@ -79,7 +79,7 @@ pub(super) fn json_value_reply(
     request_id: &str,
     elapsed_ms: u128,
 ) -> ApiReply {
-    match nv_to_json(vm, nv, 0) {
+    match nv_to_typed_json(vm, nv, api_return_type(fn_name).as_deref(), 0) {
         Some(result_json) => {
             // PLAN-734 T-03（D3）：`{"error":` 前缀猜测退役——业务 record
             // 含 error 字段是数据（200）；错误状态由执行/序列化失败决定。

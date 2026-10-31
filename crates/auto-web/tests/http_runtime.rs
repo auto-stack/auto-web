@@ -29,6 +29,10 @@ fn configured_file_entry(profile: &str) {
         &source,
         r#"#[api(method = "GET", path = "/nonce")]
 fn nonce() str { "web-package-runtime-890" }
+#[api(method = "GET", path = "/names")]
+fn names() []str { return "alpha.txt,照片.png".split(",") }
+#[api(method = "GET", path = "/ints")]
+fn ints() []int { return [-1, -4, -5] }
 "#,
     )
     .unwrap();
@@ -89,6 +93,26 @@ fn nonce() str { "web-package-runtime-890" }
         response.split_once("\r\n\r\n").unwrap().1,
         "\"web-package-runtime-890\""
     );
+    for (route, expected) in [
+        ("/names", serde_json::json!(["alpha.txt", "照片.png"])),
+        ("/ints", serde_json::json!([-1, -4, -5])),
+    ] {
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(
+            socket,
+            "GET {route} HTTP/1.1\r\nHost: only.example\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let json: serde_json::Value =
+            serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(json, expected, "{route}");
+    }
     assert!(
         TcpStream::connect(("127.0.0.1", fallback_port)).is_err(),
         "configured service must not bind the environment port"
