@@ -1,9 +1,11 @@
 # AutoWeb
 
-Web service framework extracted under PLAN-890. Product code is in the existing
-`lang-890/auto-web` worktree until the Plan's final delivery gates pass.
+Independent Web service framework, version0.1.0. Runtime, HTTP generation,
+resources/tests and independent delivery have one owner here.
 
-Explicit SDK composition:
+Start with [canonical project](docs/specs/project.md), [architecture](docs/specs/architecture.md),
+[HTTP/SDK composition](docs/specs/http-contracts.md), [testing](docs/specs/testing.md)
+and [source/Windows delivery and recovery](docs/specs/delivery.md).
 
 ```rust,ignore
 auto_web::install_http_service_host_if_absent();
@@ -13,33 +15,13 @@ auto_lang_core::vm::host_capabilities::http_service::with_http_service_launch(
 )?;
 ```
 
-`WebHttpServiceHost` implements the language SDK's local `HttpServiceHost` port.
-The installer never replaces a custom provider. Explicit replacement is the
-SDK's existing setter. Ordinary language calls need no Web host; service calls
-without an installed host fail before binding. No Core runtime fallback exists.
+CLI: `cargo run -p auto-web -- run api.at --config service.json`.
+Generation: `auto_web::generate_api(project, "rust")` / `"vue"`;
+`backend_generation_is_fresh(project)` checks actual source/assembly/lock inputs.
+Installation preserves custom providers. Ordinary language execution needs no Web;
+service calls without a host reject before listening. Man/UI compose internally.
 
-Local CLI: `cargo run -p auto-web -- run api.at --config service.json`.
-Library generation: `auto_web::generate_api(project, "rust")` or `"vue"`;
-`backend_generation_is_fresh(project)` checks real source/assembly/lock inputs.
-HTTP target generators live at `auto_web::api::{AxumGenerator, TypeScriptGenerator}`.
-Tauri IPC remains in `auto-api-gen`; its legacy dispatcher delegates HTTP here.
-
-The central contract is the language main checkout's
-`docs/plans/890-auto-web-independent-repository-delivery.md`.
-Man/UI composition is wired through the public Web exports. The language
-governance catalog registers `web-unit`, `web-http`, and `web-generation` as
-separate recipes with the original IDs/conditions preserved across their move.
-Independent source distribution/recovery (T-09), application acceptance and final
-review/landing remain pending. Local package checks do not certify those gates.
-
-Run the independent Web tests in this repository:
-
-```text
-cargo nextest run -p auto-web-contract -p auto-web --lib --features auto-web/test-http-e2e
-cargo nextest run -p auto-web --test http_runtime --test http_generation
-```
-
-The Web nextest configuration keeps HTTP processes serial and preserves the
-original full-tier deadlines. Original ignored tests remain explicitly ignored.
-`crates/auto-web/tests/fixtures/885-back` retains the original generator fixture
-bytes; language VM/standard-library boundary fixtures stay with their consumers.
+The [central Plan](../auto-lang/docs/plans/archive/890-auto-web-independent-repository-delivery.md)
+separates independent acceptance from actual final gates and local landings.
+Local Git delivery does not mean remote push/registry release. Provenance remains
+in [docs/source-provenance.md](docs/source-provenance.md).
