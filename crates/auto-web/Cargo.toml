@@ -34,9 +34,13 @@ semver="1"
 sha2="0.10"
 
 [features]
-test-http-e2e = ["auto-lang-core/test-http-e2e"]
+# PLAN-901：语言仓 test-http-e2e feature 拍平退役——Core HTTP helper 转
+# 常驻可见；本 Web 域 feature 名保留（auto-api-gen/auto-man/CI 入口仍以
+# 此名选择 Web e2e 串行档），仅去掉已不存在的语言侧转发。
+test-http-e2e = []
 
 [dev-dependencies]
-auto-lang-core = { path="../../../auto-lang/crates/auto-lang-core",features=["test-http-e2e"] }
+# PLAN-901：helper 常驻后 dev 测试无需再请求语言 feature。
+auto-lang-core = { path="../../../auto-lang/crates/auto-lang-core" }
 tempfile="3"
 blake3="1.5"

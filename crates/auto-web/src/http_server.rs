@@ -123,9 +123,9 @@ pub(crate) fn multipart_handler_json(fields: &str, files: &str) -> String {
 // =============================================================================
 // PLAN-755 T-02/R2（P755-R2-01）：e2e 启动结果有界上报共享核心
 // =============================================================================
-#[cfg(any(test, feature = "test-http-e2e"))]
+// PLAN-901：语言仓 test-http-e2e 拍平——Core helper 转常驻，跨仓 re-export
+// 门随之退役（本 re-export 供语言/HTTP 测试族经 auto_lang::vm::ffi 消费）。
 pub use auto_lang_core::vm::ffi::http_server::spawn_outcome_reporter_for_test;
-#[cfg(any(test, feature = "test-http-e2e"))]
 use auto_lang_core::vm::ffi::http_server::spawn_outcome_reporter_for_test as spawn_outcome_reporter;
 #[cfg(test)]
 mod plan326_tests {
