@@ -9,7 +9,7 @@ HTTP processes remain serial under the existing nextest isolation/resources.
 | Library and original e2e | cargo nextest run -p auto-web-contract -p auto-web --lib --features auto-web/test-http-e2e |
 | Public runtime | cargo nextest run -p auto-web --test http_runtime |
 | Real generation | cargo nextest run -p auto-web --test http_generation |
-| Module/consumer union | language cargo tm explicit IDs/changed paths, including web-unit/web-http/web-generation |
+| Four-owner fixed gate | language `python scripts/web-four-repository.py --out <local-directory>`; Web `--lib --tests` includes both real HTTP integration targets |
 
 Runtime tests use the actual installed Web crate/CLI over TCP: exact response,
 different config/environment ports, loopback/profile/config hash, Host rejection,
@@ -24,8 +24,9 @@ and web-historical-obligations.json. The original885 generator fixture is retain
 at crates/auto-web/tests/fixtures/885-back with unchanged bytes.
 
 The four-owner gate freezes language/Web/UI/Man plus the fixed Down dependency.
-Actual complete language modules/consumer closure execute once; Web/media receipt
-legs come from their original atomic outputs. UI/Man retain their own commands;
+The explicit affected PLAN-896 language fixed groups execute once through `cargo t`;
+Web library and all integration targets retain their original atomic outputs.
+Media belongs to the explicit auto-media-core group. UI/Man retain their own commands;
 ui_gen remains single-process. Source, selection, command, output/hash, exact
 passed IDs and internal case/child comparisons are checked at consumption.
 Producer and consumer share the original source-baseline/floor/retirement rules;

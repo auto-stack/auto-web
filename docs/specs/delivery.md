@@ -34,7 +34,7 @@ the user retention/budget policy; durable summaries live in the central Plan.
 
 Final gate status and actual landed cohort are recorded in the
 [central delivery receipt](../../../auto-lang/docs/plans/archive/890-auto-web-independent-repository-delivery.md).
-Before landing, execute the frozen affected module/consumer/integration union,
+Before landing, execute the frozen explicit affected `cargo t` fixed groups and necessary consumers/integration,
 real four-owner gate and current-cohort release/history checks. After landing,
 verify canonical/ledger/index readback, archive and every guarded tree cleanup.
 A final review pass does not waive a failed gate. Due periodic regression belongs
