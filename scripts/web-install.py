@@ -59,7 +59,8 @@ def validate_packages(packages):
         raise ValueError('missing/duplicate Web source package')
     for package in packages:
         name = package['name']
-        owner = 'auto-web' if name in ('auto-web', 'auto-web-contract') else 'auto-lang'
+        # PLAN-906: auto-web-contract 单源迁语言仓——receipt owner 随源树翻转。
+        owner = 'auto-web' if name == 'auto-web' else 'auto-lang'
         if (package['source_repo'] != owner or package['source_path'] != 'crates/' + name
                 or package['installed_path'] != 'crates/' + name
                 or name.startswith(('auto-ui', 'auto-man')) or name in ('tauri', 'auto-lang', 'auto-api-gen')):

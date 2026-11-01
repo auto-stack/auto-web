@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/auto-web-contract", "crates/auto-web"]
+members = ["crates/auto-web"]
 resolver = "2"
 
 [workspace.package]

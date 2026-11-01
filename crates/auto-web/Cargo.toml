@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-auto-web-contract = { path = "../auto-web-contract", version = "=0.1.0" }
+# PLAN-906: 轻合同单源迁语言仓（Web 消费语言仓 crate，方向=既有 web→lang path 依赖）
+auto-web-contract = { path = "../../../auto-lang/crates/auto-web-contract", version = "=0.1.0" }
 auto-lang-core = { path = "../../../auto-lang/crates/auto-lang-core" }
 auto-generation-core = { path = "../../../auto-lang/crates/auto-generation-core", version = "=0.1.0" }
 
