@@ -1,4 +1,5 @@
 //! Web-only dependency composition over the single shared workspace mechanism.
+pub use auto_generation_core::generated_build;
 pub use auto_generation_core::rust_workspace::*;
 use auto_val::AutoResult;
 use std::path::{Path, PathBuf};

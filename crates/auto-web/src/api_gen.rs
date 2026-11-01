@@ -182,7 +182,10 @@ pub fn backend_generation_is_fresh(project_dir: &Path) -> bool {
         return true; // 无契约项目：无新鲜度可校验，维持旧行为
     };
     let ws_dir = crate::rust_workspace::resolve_rust_workspace_dir(project_dir);
-    let back_name = crate::rust_workspace::back_member_name(project_dir);
+    let back_name = crate::rust_workspace::generated_build::member_dir_name(
+        project_dir,
+        crate::rust_workspace::generated_build::MemberRole::Back,
+    );
     let record_path = ws_dir.join(&back_name).join("generation.json");
     let Ok(record_text) = std::fs::read_to_string(&record_path) else {
         return false; // 无 ready 记录（旧产物）——不复用
@@ -235,16 +238,13 @@ pub fn backend_generation_is_fresh(project_dir: &Path) -> bool {
     // 读取（含零字节空文件）一律实际内容指纹（空文件=811c9dc5，与生成端
     // 收据同口径）；**其它读取错误（权限/IO）不冒充 absent**——归 None
     // （不可核验=保守陈旧），防止 recorded="absent" × 读错误 → 假新鲜。
-    let current_lock: Option<String> = crate::rust_workspace::try_ensure_workspace_for(
-        project_dir,
-        crate::rust_workspace::WorkspaceRequirements::Service,
-    )
-    .ok()
-    .and_then(|workspace| {
-        crate::rust_workspace::workspace_lock_identity(std::fs::read(workspace.join("Cargo.lock")))
+    // PLAN-910: freshness checking is read-only — the lock identity is read
+    // from the resolved workspace without ensuring (no manifest/config rewrite
+    // from a check path; the receipt writer still ensures before writing).
+    let current_lock: Option<String> =
+        crate::rust_workspace::workspace_lock_identity(std::fs::read(ws_dir.join("Cargo.lock")))
             .ok()
-    })
-    .map(|identity| identity.unwrap_or_else(|| "absent".to_string()));
+            .map(|identity| identity.unwrap_or_else(|| "absent".to_string()));
     // PLAN-738 R5-01：一次绑定状态机。生成时未建 lock（收据记 absent）
     // → 首次出现实际 lock 时判新鲜**并把实际 lock 身份写回收据**（一次性
     // 物化绑定，收据升级）——此后严格比较：依赖版本漂移/lock 删除/读取
@@ -340,13 +340,32 @@ fn generate_rust_server(
     let api_module = parsed.as_ref().unwrap_or(api_module);
     // Freeze actual selections and emitted body references before creating artifacts.
     let assembly = generated_api_assembly(root_dir, api_module)?;
-    // Output to shared workspace at D:/.auto/rust-workspace/{name}-back/
+    // Output to shared workspace at <ws>/{name}-{id8}-back/ (PLAN-910
+    // member identity: canonical project path id — same-basename projects at
+    // different roots never claim one member dir; legacy basename members are
+    // refused by claim_member_dir, not reclaimed).
     let ws_dir = crate::rust_workspace::try_ensure_workspace_for(
         root_dir,
         crate::rust_workspace::WorkspaceRequirements::Service,
     )?;
-    let back_name = crate::rust_workspace::back_member_name(root_dir);
-    let rust_dir = ws_dir.join(&back_name);
+    let back_name = crate::rust_workspace::generated_build::member_dir_name(
+        root_dir,
+        crate::rust_workspace::generated_build::MemberRole::Back,
+    );
+    let rust_dir = crate::rust_workspace::generated_build::claim_member_dir(
+        &ws_dir,
+        root_dir,
+        crate::rust_workspace::generated_build::MemberRole::Back,
+    )?;
+    // PLAN-910: record which generated-cargo build context owns the consumer
+    // cache for this backend (additive fields; the strict freshness gate keeps
+    // its existing semantics).
+    let build_context = crate::rust_workspace::generated_build::GeneratedBuildContext::resolve(
+        root_dir,
+        &ws_dir,
+        crate::rust_workspace::WorkspaceRequirements::Service,
+    )?;
+    build_context.write_context_file()?;
     let receipt_path = rust_dir.join("generation.json");
     if receipt_path.exists() {
         std::fs::remove_file(&receipt_path)?;
@@ -716,6 +735,13 @@ fn generate_rust_server(
             "assembly": assembly,
             "scaffold": scaffold,
             "workspace_lock": workspace_lock,
+            "build_context": {
+                "context_id": build_context.context_id,
+                "target_root": build_context
+                    .target_root
+                    .to_string_lossy()
+                    .to_string(),
+            },
         });
         std::fs::write(rust_dir.join("generation.json"), record.to_string())
             .map_err(|e| format!("cannot write generation receipt: {e}"))?;
@@ -8322,7 +8348,10 @@ pub fn duplicate(id int) Note { return db.clone_note(id) }
         generate_api(&project, "rust").expect("generate_api 015 ok");
 
         let ws = crate::rust_workspace::ensure_shared_workspace(&project);
-        let back = crate::rust_workspace::back_member_name(&project);
+        let back = crate::rust_workspace::generated_build::member_dir_name(
+            &project,
+            crate::rust_workspace::generated_build::MemberRole::Back,
+        );
         let api_rs = std::fs::read_to_string(ws.join(&back).join("src").join("api.rs"))
             .expect("api.rs exists");
         let main_rs = std::fs::read_to_string(ws.join(&back).join("src").join("main.rs"))
@@ -8671,7 +8700,10 @@ mod plan738_generated_service {
         std::env::set_var("AUTO_STDLIB_ROOT", &local_stdlib);
         generate_api(&root, "rust").expect("production generate_api");
         let workspace = crate::rust_workspace::ensure_shared_workspace(&root);
-        let name = crate::rust_workspace::back_member_name(&root);
+        let name = crate::rust_workspace::generated_build::member_dir_name(
+            &root,
+            crate::rust_workspace::generated_build::MemberRole::Back,
+        );
         let member = workspace.join(&name);
         let read_receipt = || {
             serde_json::from_str::<serde_json::Value>(
