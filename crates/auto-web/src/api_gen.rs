@@ -367,8 +367,13 @@ fn generate_rust_server(
     )?;
     build_context.write_context_file()?;
     let receipt_path = rust_dir.join("generation.json");
+    let pending_receipt = rust_dir.join("generation.json.pending");
+    let _ = std::fs::remove_file(&pending_receipt);
     if receipt_path.exists() {
-        std::fs::remove_file(&receipt_path)?;
+        // PLAN-910: park (rename keeps bytes+mtime) instead of deleting — an
+        // unchanged regeneration restores it untouched; any early failure
+        // leaves no valid receipt, exactly as the previous delete did.
+        std::fs::rename(&receipt_path, &pending_receipt)?;
     }
     let src_dir = rust_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("Failed to create rust/src: {}", e))?;
@@ -393,12 +398,12 @@ fn generate_rust_server(
 
     // Generate Cargo.toml (workspace member version — no [workspace])
     let cargo_toml = generate_cargo_toml(&back_name, has_sse, has_db);
-    std::fs::write(rust_dir.join("Cargo.toml"), &cargo_toml)
+    write_generated(&rust_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("Failed to write Cargo.toml: {}", e))?;
 
     // Generate types.rs
     let types_rs = generate_types_rs(api_module);
-    std::fs::write(src_dir.join("types.rs"), &types_rs)
+    write_generated(&src_dir.join("types.rs"), &types_rs)
         .map_err(|e| format!("Failed to write types.rs: {}", e))?;
 
     // Plan 742: companion modules must exist BEFORE api.rs generation —
@@ -434,7 +439,7 @@ fn generate_rust_server(
                 Ok((rs, _)) => {
                     let rs = post_process_companion_rs(rs);
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
-                    if let Err(e) = std::fs::write(src_dir.join(format!("{}.rs", stem)), &rs) {
+                    if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
                         eprintln!("  ⚠ Failed to write {}.rs: {}", stem, e);
                         continue;
                     }
@@ -464,7 +469,7 @@ fn generate_rust_server(
                         db_rs = borrow_string_module_call_args(&db_rs, &repo_rs, "repository::");
                     }
                     // Also persist db.rs (idempotent with the write below).
-                    if let Err(e) = std::fs::write(src_dir.join("db.rs"), &db_rs) {
+                    if let Err(e) = write_generated(&src_dir.join("db.rs"), &db_rs) {
                         eprintln!("  ⚠ Failed to write db.rs: {}", e);
                     }
                     Some(extract_db_fn_names(&db_rs))
@@ -502,7 +507,7 @@ fn generate_rust_server(
             match transpile_back_module_to_rs("api_impl", &stripped) {
                 Ok(rs) => {
                     let rs = post_process_companion_rs(rs);
-                    std::fs::write(src_dir.join("api_impl.rs"), &rs)
+                    write_generated(&src_dir.join("api_impl.rs"), &rs)
                         .map_err(|e| format!("Failed to write api_impl.rs: {}", e))?;
                     api_impl_active = true;
                 }
@@ -541,7 +546,7 @@ fn generate_rust_server(
             api_rs = borrow_string_module_call_args(&api_rs, &m_source, &marker);
         }
     }
-    std::fs::write(src_dir.join("api.rs"), &api_rs)
+    write_generated(&src_dir.join("api.rs"), &api_rs)
         .map_err(|e| format!("Failed to write api.rs: {}", e))?;
 
     // PLAN-681 T-01: generic companion-module transpilation. Every
@@ -579,7 +584,7 @@ fn generate_rust_server(
                 Ok((rs, _)) => {
                     let rs = post_process_companion_rs(rs);
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
-                    if let Err(e) = std::fs::write(src_dir.join(format!("{}.rs", stem)), &rs) {
+                    if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
                         eprintln!("  ⚠ Failed to write {}.rs: {}", stem, e);
                         continue;
                     }
@@ -595,7 +600,7 @@ fn generate_rust_server(
     // Plan musk-022: events broadcast-bus module for SSE backends.
     if has_sse {
         let events_rs = generate_events_rs();
-        std::fs::write(src_dir.join("events.rs"), &events_rs)
+        write_generated(&src_dir.join("events.rs"), &events_rs)
             .map_err(|e| format!("Failed to write events.rs: {}", e))?;
     }
 
@@ -662,7 +667,7 @@ fn generate_rust_server(
             assembly.consumer_fingerprint()
         ),
     );
-    std::fs::write(src_dir.join("main.rs"), &main_rs)
+    write_generated(&src_dir.join("main.rs"), &main_rs)
         .map_err(|e| format!("Failed to write main.rs: {}", e))?;
 
     // PLAN-013 T2: pac.at rust_sidecar 供给到 back crate(用户 .rs 模块
@@ -743,11 +748,39 @@ fn generate_rust_server(
                     .to_string(),
             },
         });
-        std::fs::write(rust_dir.join("generation.json"), record.to_string())
-            .map_err(|e| format!("cannot write generation receipt: {e}"))?;
+        // PLAN-910: keep the receipt bytes (and mtime) stable across
+        // unchanged regenerations — only `generated_at` would differ. The
+        // previous receipt was parked as *.pending at generation start.
+        let mut semantic = record.clone();
+        semantic["generated_at"] = serde_json::Value::Null;
+        let unchanged = std::fs::read_to_string(&pending_receipt)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .map(|previous| {
+                let mut previous_semantic = previous;
+                previous_semantic["generated_at"] = serde_json::Value::Null;
+                previous_semantic == semantic
+            })
+            .unwrap_or(false);
+        if unchanged {
+            std::fs::rename(&pending_receipt, &receipt_path)
+                .map_err(|e| format!("cannot restore generation receipt: {e}"))?;
+        } else {
+            std::fs::write(&receipt_path, record.to_string())
+                .map_err(|e| format!("cannot write generation receipt: {e}"))?;
+            let _ = std::fs::remove_file(&pending_receipt);
+        }
     }
 
     Ok(())
+}
+
+/// PLAN-910: generated files are written only when their bytes change — an
+/// unconditional rewrite bumps mtimes on every generation and forces one
+/// pointless rebuild of the member crate (905 observed; serve_rust
+/// regenerates on every launch).
+fn write_generated(path: &std::path::Path, bytes: &str) -> std::io::Result<()> {
+    crate::rust_workspace::generated_build::write_if_changed(path, bytes.as_bytes()).map(|_| ())
 }
 
 /// Generate Cargo.toml for the Rust server (workspace member version).
