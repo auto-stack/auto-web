@@ -38,3 +38,20 @@ remain linked from those pages rather than being silently redefined.
 The central [PLAN-890](../../../auto-lang/docs/plans/archive/890-auto-web-independent-repository-delivery.md)
 records independent acceptance and actual final gates separately. Local Git
 landing is not remote push, registry publication or new production certification.
+
+## Generated Rust backend members (PLAN-910 SD-04)
+
+- Back member dir `<basename>-<id8>-back` (claimed through
+  `generated_build::claim_member_dir`; `-back` suffix kept for tooling);
+  package name derives from it with the digit-leading `app-` rule.
+- Generated files (`Cargo.toml`, `src/*.rs`) are written on content change
+  only; `generation.json` is parked as `.pending` during regeneration and
+  restored byte-identical when unchanged (a failed generation leaves no valid
+  receipt). The receipt gains additive `build_context {context_id,
+  target_root}`; `backend_generation_is_fresh` is read-only.
+- Mixed front/back workspaces: the core workspace ensure writes
+  `auto-web = { path, version = "=0.1.0" }` whenever a member references
+  `auto-web`; the facade injection remains idempotent.
+- Man `serve_rust` runs the member with the shared build-context env pins and
+  holds a target-root lease for the service lifetime (see auto-man
+  generated-cargo-context).
