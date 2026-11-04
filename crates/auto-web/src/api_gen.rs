@@ -401,8 +401,53 @@ fn generate_rust_server(
     write_generated(&rust_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("Failed to write Cargo.toml: {}", e))?;
 
+    // PLAN-046 F-1: a `src/back/types.at` companion used to be transpiled
+    // over this file later (companion loop), destroying the scaffold-owned
+    // api.at types (E0422 `ViewerControl`) and emitting a2r slice fields
+    // (E0106 `&[T]` in an owned struct). When types.at declares ONLY pub
+    // types (the 031-image-viewer shape), merge its types into types.rs here
+    // and skip the companion transpile for that stem. Unrepresentable field
+    // shapes keep the legacy path (transpile overwrite) with a named warning.
+    let mut merged_types: Vec<ApiType> = api_module.types.clone();
+    let mut skip_transpile_stems: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let types_at = root_dir.join("src").join("back").join("types.at");
+    if let Ok(content) = std::fs::read_to_string(&types_at) {
+        let types_only = !content.contains("pub fn") && !content.contains("#[api");
+        if types_only {
+            match try_full_parse(&content).or_else(|| extract_api_lenient(&content)) {
+                Some(module) if !module.types.is_empty() => {
+                    let mut unreprable: Vec<String> = Vec::new();
+                    for t in module.types {
+                        if merged_types.iter().any(|x| x.name == t.name) {
+                            eprintln!(
+                                "  ⚠ types.at type `{}` shadows an api.at type; keeping the api.at definition",
+                                t.name
+                            );
+                            continue;
+                        }
+                        if api_type_reprable(&t) {
+                            merged_types.push(t);
+                        } else {
+                            unreprable.push(t.name);
+                        }
+                    }
+                    if unreprable.is_empty() {
+                        skip_transpile_stems.insert("types".to_string());
+                    } else {
+                        eprintln!(
+                            "  ⚠ types.at types {:?} have fields auto_type_to_rust cannot represent; keeping legacy companion transpile for types.at",
+                            unreprable
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // Generate types.rs
-    let types_rs = generate_types_rs(api_module);
+    let types_rs = generate_types_rs_from(&merged_types);
     write_generated(&src_dir.join("types.rs"), &types_rs)
         .map_err(|e| format!("Failed to write types.rs: {}", e))?;
 
@@ -412,6 +457,7 @@ fn generate_rust_server(
     // injection below only adds modules that actually transpiled. Moving the
     // loop up also lets the api.rs emitter rely on companion modules without
     // ordering surprises (previously written after api.rs).
+    let mut companion_uses_image = false;
     let mut companion_mods: Vec<String> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(root_dir.join("src").join("back")) {
         let mut stems: Vec<String> = entries
@@ -426,6 +472,9 @@ fn generate_rust_server(
             .collect();
         stems.sort();
         for stem in stems {
+            if skip_transpile_stems.contains(&stem) {
+                continue;
+            }
             let Ok(content) = std::fs::read_to_string(
                 root_dir
                     .join("src")
@@ -437,6 +486,9 @@ fn generate_rust_server(
             let back_dir = root_dir.join("src").join("back");
             match transpile_back_module_to_rs_with_proofs(&stem, &content, Some(back_dir.clone())) {
                 Ok((rs, _)) => {
+                    if rs.contains("use crate::image;") {
+                        companion_uses_image = true;
+                    }
                     let rs = post_process_companion_rs(rs);
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
                     if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
@@ -571,6 +623,9 @@ fn generate_rust_server(
             .collect();
         stems.sort();
         for stem in stems {
+            if skip_transpile_stems.contains(&stem) {
+                continue;
+            }
             let Ok(content) = std::fs::read_to_string(
                 root_dir
                     .join("src")
@@ -582,6 +637,9 @@ fn generate_rust_server(
             let back_dir = root_dir.join("src").join("back");
             match transpile_back_module_to_rs_with_proofs(&stem, &content, Some(back_dir.clone())) {
                 Ok((rs, _)) => {
+                    if rs.contains("use crate::image;") {
+                        companion_uses_image = true;
+                    }
                     let rs = post_process_companion_rs(rs);
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
                     if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
@@ -593,6 +651,29 @@ fn generate_rust_server(
                 Err(e) => {
                     eprintln!("  ⚠ {}.rs transpile failed (module skipped): {}", stem, e);
                 }
+            }
+        }
+    }
+
+    // PLAN-046 F-1 (legacy path backstop): if types.at was NOT skipped above
+    // (it carries pub fns), its companion transpile overwrote types.rs and
+    // the api.at scaffold types may be missing (E0422). Append any missing
+    // api.at types so `crate::types::*` always resolves the contract types.
+    if !skip_transpile_stems.contains("types") && types_at.exists() {
+        if let Ok(existing) = std::fs::read_to_string(src_dir.join("types.rs")) {
+            let missing: Vec<&ApiType> = api_module
+                .types
+                .iter()
+                .filter(|t| !existing.contains(&format!("struct {} {{", t.name)))
+                .collect();
+            if !missing.is_empty() {
+                let mut reconciled = existing;
+                reconciled.push('\n');
+                reconciled.push_str(&generate_types_rs_from(
+                    &missing.iter().map(|t| (*t).clone()).collect::<Vec<_>>(),
+                ));
+                write_generated(&src_dir.join("types.rs"), &reconciled)
+                    .map_err(|e| format!("Failed to reconcile types.rs: {}", e))?;
             }
         }
     }
@@ -660,13 +741,20 @@ fn generate_rust_server(
         &companion_mods,
         api_impl_active,
     );
-    let main_rs = main_rs.replace(
+    let mut main_rs = main_rs.replace(
         "fn __assembly_fingerprint() -> Option<&'static str> { None }",
         &format!(
             "fn __assembly_fingerprint() -> Option<&'static str> {{ Some(\"{}\") }}",
             assembly.consumer_fingerprint()
         ),
     );
+    // PLAN-046 F-1: companion modules that `use auto.image` transpile to
+    // `use crate::image;` — provide the module as a thin delegation shim over
+    // auto_media_core::image_pipeline (same host control plane the api.rs
+    // image endpoints call, Plan 547), otherwise the build dies with E0432.
+    if companion_uses_image {
+        main_rs.push_str(IMAGE_HOST_MODULE_SHIM);
+    }
     write_generated(&src_dir.join("main.rs"), &main_rs)
         .map_err(|e| format!("Failed to write main.rs: {}", e))?;
 
@@ -886,12 +974,18 @@ fn rust_field_ident(name: &str) -> String {
 
 /// Generate types.rs with serde structs
 fn generate_types_rs(api_module: &auto_lang_core::api::ApiModule) -> String {
+    generate_types_rs_from(&api_module.types)
+}
+
+/// PLAN-046 F-1: type-list form so scaffold types and merged companion
+/// (types.at) types share one emission path.
+fn generate_types_rs_from(types: &[ApiType]) -> String {
     let mut lines = vec![
         "use serde::{Serialize, Deserialize};".to_string(),
         "".to_string(),
     ];
 
-    for api_type in &api_module.types {
+    for api_type in types {
         // Include Default derive for simple placeholder generation
         lines.push(format!(
             "#[derive(Clone, Debug, Default, Serialize, Deserialize)]"
@@ -976,6 +1070,44 @@ fn auto_type_to_rust(auto_type: &str) -> String {
             format!("({})", parts.join(", "))
         }
         s => s.to_string(),
+    }
+}
+
+/// PLAN-046 F-1: conservative representability gate for merging a
+/// types-only `types.at` into scaffold-generated types.rs. Every accepted
+/// field shape must round-trip through `auto_type_to_rust`; anything else
+/// (nested inline records, maps, `byte`, generics, ...) keeps the legacy
+/// a2r companion-transpile path with a named warning.
+fn api_type_reprable(t: &ApiType) -> bool {
+    t.fields.iter().all(|f| auto_type_reprable(&f.ty))
+}
+
+fn auto_type_reprable(ty: &str) -> bool {
+    let t = ty.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if let Some(inner) = t.strip_prefix('?') {
+        return auto_type_reprable(inner);
+    }
+    if let Some(inner) = t.strip_suffix('?') {
+        return auto_type_reprable(inner);
+    }
+    match t {
+        "int" | "str" | "bool" | "float" | "any" => true,
+        // `byte` and other lowercase stdlib pseudo-types would fall through
+        // to the ident arm and then to an invalid Rust passthrough.
+        "byte" | "void" | "self" => false,
+        // []T: element must itself be representable.
+        _ if t.starts_with("[]") => auto_type_reprable(&t[2..]),
+        // (T1, T2, ...): every element representable (top-level commas only).
+        _ if t.starts_with('(') && t.ends_with(')') => {
+            t[1..t.len() - 1].split(',').all(auto_type_reprable)
+        }
+        // Plain user type name (possibly namespaced a.b.C).
+        _ => t
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == ':'),
     }
 }
 
@@ -2982,6 +3114,46 @@ async fn auto_photos_full(
 }
 "#;
 
+/// PLAN-046 F-1: crate-root `image` module backing companion modules that
+/// `use auto.image` (a2r transpiles the import to `use crate::image;`).
+/// Same host control plane the api.rs image endpoints delegate to (Plan 547):
+/// `auto_media_core::image_pipeline`. Emitted into main.rs only when a
+/// companion actually references it.
+const IMAGE_HOST_MODULE_SHIM: &str = r#"
+mod image {
+    pub fn open_session(path: &str) -> String {
+        auto_media_core::image_pipeline::open_media_session(path.to_string())
+    }
+    pub fn snapshot(session: &str) -> String {
+        auto_media_core::image_pipeline::media_session_snapshot(session)
+    }
+    pub fn current_uri(session: &str) -> String {
+        auto_media_core::image_pipeline::media_session_uri(session)
+    }
+    pub fn names(session: &str) -> Vec<String> {
+        auto_media_core::image_pipeline::media_session_names(session)
+    }
+    pub fn navigate(session: &str, delta: i64) -> String {
+        auto_media_core::image_pipeline::navigate_media_session(session, delta as i32)
+    }
+    pub fn request_view(session: &str, index: i64, viewport_width: i64, viewport_height: i64, quality: i64) -> String {
+        auto_media_core::image_pipeline::request_media_view(
+            session,
+            index as i32,
+            viewport_width as i32,
+            viewport_height as i32,
+            quality as i32,
+        )
+    }
+    pub fn close_session(session: &str) -> bool {
+        auto_media_core::image_pipeline::close_media_session(session)
+    }
+    pub fn session_stats(session: &str) -> String {
+        auto_media_core::image_pipeline::media_session_stats(session)
+    }
+}
+"#;
+
 const MEDIA_HTTP_HANDLER: &str = r#"async fn auto_media(
     method: axum::http::Method,
     uri: axum::http::Uri,
@@ -4655,22 +4827,30 @@ fn generate_main_rs(
     let has_db = db_at_content.map(|c| c.contains("pub fn")).unwrap_or(false);
 
     let mut s = String::new();
-    s.push_str("mod api;\n");
-    s.push_str("mod types;\n");
+    // PLAN-046 F-1: dedup module declarations — a companion stem can collide
+    // with a scaffold-owned module name (`types`), which previously emitted
+    // `mod types;` twice (E0428).
+    let mut mod_decls: Vec<&str> = vec!["api", "types"];
     if has_sse {
-        s.push_str("mod events;\n");
+        mod_decls.push("events");
     }
     if has_db {
-        s.push_str("mod db;\n");
+        mod_decls.push("db");
     }
     // PLAN-681 T-01/T-02: companion modules (src/back/*.at minus api/db) and
     // the route-A endpoint-body module, so `crate::<mod>` paths in the
     // delegating handlers resolve.
     for stem in companion_mods {
-        s.push_str(&format!("mod {};\n", stem));
+        mod_decls.push(stem.as_str());
     }
     if api_impl_active {
-        s.push_str("mod api_impl;\n");
+        mod_decls.push("api_impl");
+    }
+    let mut seen_mods: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for mn in mod_decls {
+        if seen_mods.insert(mn) {
+            s.push_str(&format!("mod {};\n", mn));
+        }
     }
     s.push_str(MEDIA_HTTP_HANDLER);
     s.push_str("\n");
@@ -5005,6 +5185,210 @@ fn generate_main_rs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PLAN-046 F-1 (031-image-viewer shape): a types-only `types.at` merges
+    /// into the scaffold types.rs — api.at primary type ViewerControl survives
+    /// for the legacy `Db` seed (E0422/E0425), `[]ImageEntry` fields emit as
+    /// `Vec<...>` (E0106), `mod types;` is declared once (E0428), and a
+    /// companion using `use auto.image` gets the crate-root `mod image` shim
+    /// over auto_media_core (E0432).
+    #[test]
+    fn plan046_types_at_merge_and_image_shim() {
+        let _env_guard = a2r_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let isolated_workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(project.join("src/back")).unwrap();
+        std::fs::write(
+            project.join("pac.at"),
+            "{ name: \"plan046-iv\", scene: \"workspace\" }",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("src/back/api.at"),
+            r#"pub type ViewerControl = {
+    status: str
+}
+
+#[api(method = "POST", path = "/api/viewer/open-file")]
+pub fn open_file(path str) str {
+    return image.open_session(path)
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("src/back/types.at"),
+            r#"pub type ImageEntry = {
+    id: str
+    bytes: int
+}
+
+pub type ViewerSnapshot = {
+    root: str
+    entries: []ImageEntry
+    selected: int
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("src/back/image_service.at"),
+            r#"use auto.image
+
+pub fn open_session(root str) str {
+    return image.open_session(root)
+}
+"#,
+        )
+        .unwrap();
+        struct Restore(Option<std::ffi::OsString>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(value) => std::env::set_var("AUTO_RUST_WORKSPACE", value),
+                    None => std::env::remove_var("AUTO_RUST_WORKSPACE"),
+                }
+            }
+        }
+        let _restore = Restore(std::env::var_os("AUTO_RUST_WORKSPACE"));
+        std::env::set_var("AUTO_RUST_WORKSPACE", &isolated_workspace);
+        generate_api(&project, "rust").expect("generate_api rust");
+
+        let back_dir = std::fs::read_dir(&isolated_workspace)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.join("src/main.rs").is_file())
+            .expect("generated back crate with src/main.rs");
+        let types_rs = std::fs::read_to_string(back_dir.join("src/types.rs")).unwrap();
+        assert!(
+            types_rs.contains("pub struct ViewerControl"),
+            "api.at primary type must survive in types.rs:\n{}",
+            types_rs
+        );
+        assert!(
+            types_rs.contains("pub struct ImageEntry")
+                && types_rs.contains("pub struct ViewerSnapshot"),
+            "types.at types must merge into types.rs:\n{}",
+            types_rs
+        );
+        assert!(
+            types_rs.contains("pub entries: Vec<ImageEntry>,"),
+            "[]ImageEntry field must emit as Vec (E0106):\n{}",
+            types_rs
+        );
+        assert!(
+            !types_rs.contains("&[ImageEntry]"),
+            "no borrowed slice fields in owned structs:\n{}",
+            types_rs
+        );
+        let main_rs = std::fs::read_to_string(back_dir.join("src/main.rs")).unwrap();
+        assert_eq!(
+            main_rs.matches("mod types;").count(),
+            1,
+            "mod types; must be declared exactly once (E0428):\n{}",
+            main_rs
+        );
+        assert!(
+            main_rs.contains("mod image {") && main_rs.contains("open_media_session"),
+            "crate-root image shim must back `use crate::image;` companions (E0432):\n{}",
+            main_rs
+        );
+        let api_rs = std::fs::read_to_string(back_dir.join("src/api.rs")).unwrap();
+        assert!(
+            api_rs.contains("pub type Db = Arc<Mutex<Vec<ViewerControl>>>;"),
+            "legacy Db seed must reference the primary type:\n{}",
+            api_rs
+        );
+    }
+
+    /// PLAN-046 F-1 legacy path: a types.at that also declares pub fns keeps
+    /// the a2r companion transpile (and its overwrite of types.rs); the
+    /// reconciliation append must still restore the api.at types, and the
+    /// main.rs module list must stay deduped.
+    #[test]
+    fn plan046_types_at_with_fns_keeps_single_mod_and_api_types() {
+        let _env_guard = a2r_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let isolated_workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(project.join("src/back")).unwrap();
+        std::fs::write(
+            project.join("pac.at"),
+            "{ name: \"plan046-legacy\", scene: \"workspace\" }",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("src/back/api.at"),
+            r#"pub type ViewerControl = {
+    status: str
+}
+
+#[api(method = "GET", path = "/api/viewer/health")]
+pub fn viewer_health() str {
+    return "Ready"
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("src/back/types.at"),
+            r#"pub type ImageEntry = {
+    id: str
+}
+
+pub fn image_service_status() str {
+    return "Ready"
+}
+"#,
+        )
+        .unwrap();
+        struct Restore(Option<std::ffi::OsString>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(value) => std::env::set_var("AUTO_RUST_WORKSPACE", value),
+                    None => std::env::remove_var("AUTO_RUST_WORKSPACE"),
+                }
+            }
+        }
+        let _restore = Restore(std::env::var_os("AUTO_RUST_WORKSPACE"));
+        std::env::set_var("AUTO_RUST_WORKSPACE", &isolated_workspace);
+        generate_api(&project, "rust").expect("generate_api rust");
+
+        let back_dir = std::fs::read_dir(&isolated_workspace)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.join("src/main.rs").is_file())
+            .expect("generated back crate with src/main.rs");
+        let main_rs = std::fs::read_to_string(back_dir.join("src/main.rs")).unwrap();
+        assert_eq!(
+            main_rs.matches("mod types;").count(),
+            1,
+            "mod types; must be declared exactly once even in the legacy path:\n{}",
+            main_rs
+        );
+        let types_rs = std::fs::read_to_string(back_dir.join("src/types.rs")).unwrap();
+        assert!(
+            types_rs.contains("pub struct ViewerControl"),
+            "reconciliation must restore api.at types onto the a2r types.rs:\n{}",
+            types_rs
+        );
+    }
+
+    #[test]
+    fn plan046_auto_type_reprable_grammar() {
+        assert!(auto_type_reprable("int"));
+        assert!(auto_type_reprable("?str"));
+        assert!(auto_type_reprable("[]ImageEntry"));
+        assert!(auto_type_reprable("[]str"));
+        assert!(auto_type_reprable("(int, str)"));
+        assert!(!auto_type_reprable("{ w: int }"));
+        assert!(!auto_type_reprable("byte"));
+        assert!(!auto_type_reprable(""));
+    }
 
     /// P738-R5-03 生成消费者腿：真实 generate_api + current_generated_
     /// assembly（api-generation），与同 api.at 文件的 CLI actual（rust）
