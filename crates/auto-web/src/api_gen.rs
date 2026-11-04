@@ -490,6 +490,11 @@ fn generate_rust_server(
                         companion_uses_image = true;
                     }
                     let rs = post_process_companion_rs(rs);
+                    let rs = if rs.contains("use crate::image;") {
+                        rewrite_image_module_dot_calls(&rs)
+                    } else {
+                        rs
+                    };
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
                     if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
                         eprintln!("  ⚠ Failed to write {}.rs: {}", stem, e);
@@ -641,6 +646,11 @@ fn generate_rust_server(
                         companion_uses_image = true;
                     }
                     let rs = post_process_companion_rs(rs);
+                    let rs = if rs.contains("use crate::image;") {
+                        rewrite_image_module_dot_calls(&rs)
+                    } else {
+                        rs
+                    };
                     let rs = promote_api_types_in_companion(&rs, &api_module.types);
                     if let Err(e) = write_generated(&src_dir.join(format!("{}.rs", stem)), &rs) {
                         eprintln!("  ⚠ Failed to write {}.rs: {}", stem, e);
@@ -1071,6 +1081,70 @@ fn auto_type_to_rust(auto_type: &str) -> String {
         }
         s => s.to_string(),
     }
+}
+
+/// PLAN-046 F-1: a2r emits stdlib-module calls in VM dot form
+/// (`image.open_session(...)`, from `use auto.image`). Against the crate-root
+/// `mod image` shim the valid Rust path form is `image::open_session(...)`.
+/// Rewrite bare `image.` call paths outside string/comment spans (keeps
+/// `use crate::image;` — the import carries the module name for path lookup).
+fn rewrite_image_module_dot_calls(rs: &str) -> String {
+    let chars: Vec<char> = rs.chars().collect();
+    let mut out = String::with_capacity(rs.len());
+    let mut in_string = false;
+    let mut in_line_comment = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_line_comment {
+            out.push(c);
+            if c == '\n' {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+            in_line_comment = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if chars[i..].starts_with(&['i', 'm', 'a', 'g', 'e', '.']) {
+            let prev_ok = out
+                .chars()
+                .last()
+                .map(|p| !(p.is_alphanumeric() || p == '_' || p == ':'))
+                .unwrap_or(true);
+            if prev_ok {
+                out.push_str("image::");
+                i += "image.".chars().count();
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 /// PLAN-046 F-1: conservative representability gate for merging a
@@ -5301,6 +5375,29 @@ pub fn open_session(root str) str {
             "legacy Db seed must reference the primary type:\n{}",
             api_rs
         );
+        let image_service_rs =
+            std::fs::read_to_string(back_dir.join("src/image_service.rs")).unwrap();
+        assert!(
+            image_service_rs.contains("image::open_session(root)"),
+            "module dot calls must be rewritten to path form (E0423):\n{}",
+            image_service_rs
+        );
+        assert!(
+            !image_service_rs.contains("image.open_session"),
+            "no bare module dot calls survive:\n{}",
+            image_service_rs
+        );
+    }
+
+    #[test]
+    fn plan046_image_dot_call_rewrite_masks_strings_and_comments() {
+        let src = "fn a() -> String {\n    // image.navigate in comment stays\n    let s = \"image.png\";\n    return image.navigate(session, delta);\n}\n";
+        let out = rewrite_image_module_dot_calls(src);
+        assert!(out.contains("return image::navigate(session, delta);"), "{}", out);
+        assert!(out.contains("\"image.png\""), "{}", out);
+        assert!(out.contains("// image.navigate in comment stays"), "{}", out);
+        let qualified = "crate::image::open_session(root)";
+        assert_eq!(rewrite_image_module_dot_calls(qualified), qualified);
     }
 
     /// PLAN-046 F-1 legacy path: a types.at that also declares pub fns keeps
