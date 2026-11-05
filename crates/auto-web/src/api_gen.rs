@@ -1187,7 +1187,37 @@ fn auto_type_reprable(ty: &str) -> bool {
 
 /// Determine if a path contains a path parameter (e.g., `:id`)
 fn has_path_param(path: &str) -> bool {
-    path.split('/').any(|s| s.starts_with(':'))
+    path.split('/')
+        .any(|s| s.starts_with(':') || s.starts_with('*'))
+}
+
+fn is_path_param(path: &str, name: &str) -> bool {
+    path.split('/')
+        .any(|part| part.strip_prefix(':').or_else(|| part.strip_prefix('*')) == Some(name))
+}
+
+fn path_extractor(params: &[&ApiParam]) -> String {
+    match params {
+        [] => String::new(),
+        [param] => format!(
+            "Path({}): Path<{}>",
+            param.name,
+            auto_type_to_rust(&param.ty)
+        ),
+        _ => format!(
+            "Path(({})): Path<({})>",
+            params
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            params
+                .iter()
+                .map(|p| auto_type_to_rust(&p.ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 /// Plan B1(b) (audit B1 follow-up): the `meta str` server-injected param.
@@ -1219,7 +1249,7 @@ fn endpoint_body_params(endpoint: &ApiEndpoint) -> Vec<&ApiParam> {
             if auto_lang_core::api::contract::is_upload_param(&p.ty) {
                 return false;
             }
-            let is_path = path.contains(&format!(":{}", p.name));
+            let is_path = is_path_param(&path, &p.name);
             let is_query = !is_path && matches!(method.as_str(), "GET" | "DELETE");
             !is_path && !is_query
         })
@@ -1237,7 +1267,7 @@ fn endpoint_query_params(endpoint: &ApiEndpoint) -> Vec<&ApiParam> {
             if is_meta_param(p) {
                 return false;
             }
-            let is_path = path.contains(&format!(":{}", p.name));
+            let is_path = is_path_param(&path, &p.name);
             !is_path && matches!(method.as_str(), "GET" | "DELETE")
         })
         .collect()
@@ -1246,10 +1276,9 @@ fn endpoint_query_params(endpoint: &ApiEndpoint) -> Vec<&ApiParam> {
 /// Get path params (params that appear in the URL path)
 fn endpoint_path_params(endpoint: &ApiEndpoint) -> Vec<&ApiParam> {
     let path = endpoint.path();
-    endpoint
-        .params
-        .iter()
-        .filter(|p| path.contains(&format!(":{}", p.name)))
+    path.split('/')
+        .filter_map(|part| part.strip_prefix(':').or_else(|| part.strip_prefix('*')))
+        .filter_map(|name| endpoint.params.iter().find(|p| p.name == name))
         .collect()
 }
 
@@ -1446,7 +1475,7 @@ fn resolve_db_call(
                 // handler prologue (see meta_json), never a query/body field.
                 return "&meta".to_string();
             }
-            let is_path = path.contains(&format!(":{}", p.name));
+            let is_path = is_path_param(&path, &p.name);
             let is_query = !is_path && matches!(method.as_str(), "GET" | "DELETE");
             let borrow = is_str(&p.ty) || is_slice_str(&p.ty);
             if is_path {
@@ -3352,18 +3381,17 @@ fn push_delegating_scalar_handlers(
             // 形态是 `:name` 路径参数，这里补 Path 提取（首个路径参数，
             // 主路径同约定）。
             let path_params = endpoint_path_params(endpoint);
-            let (path_sig, path_args) = match path_params.first() {
-                Some(p) => {
-                    let rust_type = auto_type_to_rust(&p.ty);
-                    let call = if rust_type == "String" {
+            let path_sig = path_extractor(&path_params);
+            let path_args: Vec<String> = path_params
+                .iter()
+                .map(|p| {
+                    if auto_type_to_rust(&p.ty) == "String" {
                         format!("&{}", p.name)
                     } else {
                         p.name.clone()
-                    };
-                    (format!("Path({}): Path<{}>", p.name, rust_type), vec![call])
-                }
-                None => (String::new(), Vec::new()),
-            };
+                    }
+                })
+                .collect();
             let mut file_sig =
                 "method: axum::http::Method, headers: axum::http::HeaderMap".to_string();
             if !path_sig.is_empty() {
@@ -3745,9 +3773,8 @@ fn generate_api_rs(
         let mut params = vec![];
         if has_path {
             let path_params = endpoint_path_params(endpoint);
-            if let Some(first) = path_params.first() {
-                let rust_type = auto_type_to_rust(&first.ty);
-                params.push(format!("Path({}): Path<{}>", first.name, rust_type));
+            if !path_params.is_empty() {
+                params.push(path_extractor(&path_params));
             }
         }
         // Only inject State<Db> when NOT delegating to db.rs.
@@ -5260,6 +5287,35 @@ fn generate_main_rs(
 mod tests {
     use super::*;
 
+    #[test]
+    fn path_capture_names_are_exact_and_extract_in_route_order() {
+        assert!(!is_path_param("/books/:ids", "id"));
+        assert!(is_path_param("/books/:id/*resource", "resource"));
+        let module = crate::shared_generation::try_full_parse(
+            r#"
+#[api(method = "GET", path = "/media/:bid/:resource")]
+pub fn media(resource str, bid str, id int) str { return resource }
+"#,
+        )
+        .unwrap();
+        let params = endpoint_path_params(&module.endpoints[0]);
+        assert_eq!(
+            params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["bid", "resource"]
+        );
+        assert_eq!(
+            path_extractor(&params),
+            "Path((bid, resource)): Path<(String, String)>"
+        );
+        assert_eq!(
+            endpoint_query_params(&module.endpoints[0])
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            ["id"]
+        );
+    }
+
     /// PLAN-046 F-1 (031-image-viewer shape): a types-only `types.at` merges
     /// into the scaffold types.rs — api.at primary type ViewerControl survives
     /// for the legacy `Db` seed (E0422/E0425), `[]ImageEntry` fields emit as
@@ -5393,9 +5449,17 @@ pub fn open_session(root str) str {
     fn plan046_image_dot_call_rewrite_masks_strings_and_comments() {
         let src = "fn a() -> String {\n    // image.navigate in comment stays\n    let s = \"image.png\";\n    return image.navigate(session, delta);\n}\n";
         let out = rewrite_image_module_dot_calls(src);
-        assert!(out.contains("return image::navigate(session, delta);"), "{}", out);
+        assert!(
+            out.contains("return image::navigate(session, delta);"),
+            "{}",
+            out
+        );
         assert!(out.contains("\"image.png\""), "{}", out);
-        assert!(out.contains("// image.navigate in comment stays"), "{}", out);
+        assert!(
+            out.contains("// image.navigate in comment stays"),
+            "{}",
+            out
+        );
         let qualified = "crate::image::open_session(root)";
         assert_eq!(rewrite_image_module_dot_calls(qualified), qualified);
     }

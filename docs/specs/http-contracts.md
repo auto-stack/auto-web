@@ -52,3 +52,12 @@ owner's canonical return declaration. Legacy native string lists are decoded onl
 under their declared string-list type; ordinary negative integers remain numbers.
 This applies to default transport, ServerHandle and LegacyStdnet. Resource/stream
 dispatch retains priority; middleware short circuits never borrow the handler type.
+
+## Generated Rust path captures (PLAN-956)
+
+Every declared path capture is extracted, in route segment order, including
+multi-capture FileResponse handlers. A single capture uses Path<T>; multiple
+captures use a tuple. Exact segment names determine path/query/body membership:
+`:ids` does not consume a parameter named `id`; `*resource` is a path capture.
+Declaration order may differ from route order. Reader's `/api/reader/media/:bid/:res`
+is a real compiled two-capture file endpoint, exercised with original PNG bytes.
