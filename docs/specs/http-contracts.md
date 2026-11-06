@@ -61,3 +61,7 @@ captures use a tuple. Exact segment names determine path/query/body membership:
 `:ids` does not consume a parameter named `id`; `*resource` is a path capture.
 Declaration order may differ from route order. Reader's `/api/reader/media/:bid/:res`
 is a real compiled two-capture file endpoint, exercised with original PNG bytes.
+
+### Generated Rust DB sibling imports (PLAN-990)
+
+For standard src/back projects, standalone Rust generation supplies db.at and companion modules with the project src/back source directory used by assembly proof collection. Sibling import declarations provide record field types to the existing language String storage and borrow rules. The db module keeps its existing post-processing and handler wiring; source-region and per-function ownership controls, legacy standalone transpiler entry points, import fallback rules and HTTP protocols remain unchanged.
