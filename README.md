@@ -25,3 +25,6 @@ The [central Plan](../auto-lang/docs/plans/archive/890-auto-web-independent-repo
 separates independent acceptance from actual final gates and local landings.
 Local Git delivery does not mean remote push/registry release. Provenance remains
 in [docs/source-provenance.md](docs/source-provenance.md).
+
+The DB sibling-import context repair for AutoOS PLAN-054 is tracked in the
+[central PLAN-990](../auto-lang/docs/plans/990-web-db-import-source-context.md).

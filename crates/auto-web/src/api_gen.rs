@@ -513,8 +513,9 @@ fn generate_rust_server(
     // them directly (status unified to db.rs lazy_static) instead of State<Db>.
     let db_fns: Option<std::collections::HashSet<String>> = if has_db {
         if let Some(ref content) = db_content {
-            match transpile_db_to_rs(content) {
-                Ok(db_rs) => {
+            let back_dir = root_dir.join("src").join("back");
+            match transpile_back_module_to_rs_with_proofs("db", content, Some(back_dir)) {
+                Ok((db_rs, _)) => {
                     let mut db_rs = post_process_db_rs(db_rs);
                     // Plan 742: db.rs bodies calling companion modules
                     // (`repository.nid_of(id)` dot-form) need the same borrow
