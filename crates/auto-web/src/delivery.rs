@@ -158,7 +158,10 @@ fn classify_closure(
         }
         let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
         if canonical == web_crate {
-            packages.insert(name.clone(), (format!("crates/{name}"), "auto-web".to_string()));
+            packages.insert(
+                name.clone(),
+                (format!("crates/{name}"), "auto-web".to_string()),
+            );
             continue;
         }
         let rel = canonical
@@ -198,13 +201,13 @@ fn git_head(root: &Path) -> AutoResult<String> {
         if revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit()) {
             return Ok(revision.to_string());
         }
-        return Err(format!(
-            "源版本标记无效（.source-revision）: {}",
-            root.display()
-        )
-        .into());
+        return Err(format!("源版本标记无效（.source-revision）: {}", root.display()).into());
     }
-    Err(format!("无法确定源版本（git HEAD / .source-revision）: {}", root.display()).into())
+    Err(format!(
+        "无法确定源版本（git HEAD / .source-revision）: {}",
+        root.display()
+    )
+    .into())
 }
 
 fn plan_export(req: &ServiceExportRequest) -> AutoResult<ExportPlan> {
@@ -222,8 +225,9 @@ fn plan_export(req: &ServiceExportRequest) -> AutoResult<ExportPlan> {
     )?;
     let api_content = fs::read_to_string(&api_file)
         .map_err(|e| format!("读取 API 合同失败 {}: {e}", api_file.display()))?;
-    let module = auto_generation_core::shared_generation::try_full_parse(&api_content)
-        .ok_or("导出失败：api.at strict 解析失败（lenient/占位产物不允许导出；修复解析错误后重试）")?;
+    let module = auto_generation_core::shared_generation::try_full_parse(&api_content).ok_or(
+        "导出失败：api.at strict 解析失败（lenient/占位产物不允许导出；修复解析错误后重试）",
+    )?;
     if module.endpoints.is_empty() && module.types.is_empty() {
         return Err("导出失败：api.at 无端点与类型（VM-only 或空合同不允许导出）".into());
     }
@@ -402,7 +406,8 @@ fn project_sdk_workspace(
         .map(|(installed, _)| format!("    \"{installed}\""))
         .collect::<Vec<_>>()
         .join(",\n");
-    let (mut projected, count) = replace_workspace_members(&text, &format!("members = [\n{members}\n]"))?;
+    let (mut projected, count) =
+        replace_workspace_members(&text, &format!("members = [\n{members}\n]"))?;
     if count != 1 {
         return Err("语言 workspace members 投影失败（未找到 members 块）".into());
     }
@@ -412,7 +417,9 @@ fn project_sdk_workspace(
         .unwrap_or("")
         .trim_end()
         .to_string();
-    projected.push_str("\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\nlicense = \"MIT\"\n");
+    projected.push_str(
+        "\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\nlicense = \"MIT\"\n",
+    );
     Ok(projected)
 }
 
@@ -450,10 +457,13 @@ fn replace_workspace_members(text: &str, replacement: &str) -> AutoResult<(Strin
 fn sanitize_member_receipts(member_stage: &Path) -> AutoResult<()> {
     let generation = member_stage.join("generation.json");
     if generation.is_file() {
-        let mut doc: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&generation)?)
-                .map_err(|e| format!("generation.json 解析失败: {e}"))?;
+        let mut doc: serde_json::Value = serde_json::from_str(&fs::read_to_string(&generation)?)
+            .map_err(|e| format!("generation.json 解析失败: {e}"))?;
+        // Development build-context anchors are machine-local; wall-clock
+        // `generated_at` breaks bundle byte-stability (review F-1006-R1-01)
+        // — drop both, keep every semantic identity field.
         doc["build_context"] = serde_json::Value::Null;
+        doc["generated_at"] = serde_json::Value::Null;
         fs::write(&generation, serde_json::to_string_pretty(&doc)? + "\n")?;
     }
     let member = member_stage.join(generated_build::MEMBER_FILE);
@@ -468,6 +478,8 @@ fn sanitize_member_receipts(member_stage: &Path) -> AutoResult<()> {
             doc["project_path"] = serde_json::Value::String(String::new());
             doc["project_basename"] = serde_json::Value::String(basename);
         }
+        // Same wall-clock concern as `generated_at` (F-1006-R1-01).
+        doc["created_at_ms"] = serde_json::Value::Null;
         fs::write(&member, serde_json::to_string_pretty(&doc)? + "\n")?;
     }
     Ok(())
@@ -521,7 +533,10 @@ fn stage_payload(plan: &ExportPlan, stage: &Path) -> AutoResult<()> {
     }
     // 2. Second-level vendor trees (same-shape, no member projection).
     for package in &plan.vendors {
-        let (_, rel) = VENDOR_TREES.iter().find(|(name, _)| name == package).unwrap();
+        let (_, rel) = VENDOR_TREES
+            .iter()
+            .find(|(name, _)| name == package)
+            .unwrap();
         let source = plan.lang_root.join(rel);
         let destination = sdk.join(rel);
         fs::create_dir_all(destination.parent().unwrap())
@@ -668,8 +683,8 @@ pub fn verify_delivery_bundle(root: &Path) -> AutoResult<()> {
     let manifest_path = root.join(DELIVERY_MANIFEST_FILE);
     let text = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("交付清单缺失 {}: {e}", manifest_path.display()))?;
-    let document: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("交付清单解析失败: {e}"))?;
+    let document: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("交付清单解析失败: {e}"))?;
     if document["schema"].as_str() != Some(DELIVERY_MANIFEST_SCHEMA)
         || document["version"].as_str() != Some(DELIVERY_VERSION)
     {
@@ -731,8 +746,8 @@ fn verify_no_dev_anchors(stage: &Path, plan: &ExportPlan) -> AutoResult<()> {
         if !(rel.ends_with(".toml") || rel.ends_with(".json") || rel.ends_with(".rs")) {
             continue;
         }
-        let text = fs::read_to_string(stage.join(rel))
-            .map_err(|e| format!("读取 {rel} 失败: {e}"))?;
+        let text =
+            fs::read_to_string(stage.join(rel)).map_err(|e| format!("读取 {rel} 失败: {e}"))?;
         scanned += 1;
         for guard in &plan.dev_path_guards {
             let needle = guard.to_string_lossy();

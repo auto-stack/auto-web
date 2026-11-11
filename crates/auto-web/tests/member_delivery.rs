@@ -14,8 +14,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use auto_web::delivery::{
-    export_rust_service, verify_delivery_bundle, ServiceExportRequest,
-    DELIVERY_MANIFEST_FILE,
+    export_rust_service, verify_delivery_bundle, ServiceExportRequest, DELIVERY_MANIFEST_FILE,
 };
 
 /// Heavy builds honor an explicit scratch root (PLAN990_SCRATCH pattern).
@@ -54,7 +53,9 @@ fn free_port() -> u16 {
 
 fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
     let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let body = body.unwrap_or("");
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -88,12 +89,7 @@ impl Drop for ServiceGuard {
     }
 }
 
-fn spawn_service(
-    binary: &Path,
-    port: u16,
-    data_root: &Path,
-    log: &Path,
-) -> ServiceGuard {
+fn spawn_service(binary: &Path, port: u16, data_root: &Path, log: &Path) -> ServiceGuard {
     let config = format!(
         "{{\"profile\":\"development\",\"listen\":{{\"port\":{port}}},\"limits\":{{\"drain_timeout_ms\":100}}}}"
     );
@@ -298,8 +294,7 @@ fn export_fail_points_preserve_prior_bundle_bytes() {
     .unwrap();
     let before = verify_delivery_bundle(&root).unwrap();
     let _ = before;
-    let manifest_before =
-        std::fs::read_to_string(root.join(DELIVERY_MANIFEST_FILE)).unwrap();
+    let manifest_before = std::fs::read_to_string(root.join(DELIVERY_MANIFEST_FILE)).unwrap();
 
     for point in ["prepare", "verify", "swap"] {
         std::env::set_var("AUTO_EXPORT_FAIL_POINT", point);
@@ -320,6 +315,57 @@ fn export_fail_points_preserve_prior_bundle_bytes() {
         );
     }
     let _ = first;
+}
+
+#[test]
+fn repeated_export_of_unchanged_inputs_is_byte_stable() {
+    // V-12 (review F-1006-R1-01): same project, same inputs, two exports —
+    // every bundle file including the delivery manifest must be identical.
+    let base = scratch_dir();
+    let project = copy_fixture_to("a", base.path());
+    let first = locked_export(&ServiceExportRequest {
+        project_dir: project.clone(),
+        delivery_root: base.path().join("stable-1"),
+        resources: vec![],
+    });
+    let second = locked_export(&ServiceExportRequest {
+        project_dir: project,
+        delivery_root: base.path().join("stable-2"),
+        resources: vec![],
+    });
+    assert_eq!(first.member_name, second.member_name);
+    assert_eq!(first.manifest_sha256, second.manifest_sha256);
+    let map_one = auto_web::delivery::verify_delivery_bundle(&first.delivery_root).unwrap();
+    let _ = map_one;
+    let files_one = file_map_sorted(&first.delivery_root);
+    let files_two = file_map_sorted(&second.delivery_root);
+    assert_eq!(
+        files_one, files_two,
+        "bundle bytes differ across repeat exports"
+    );
+}
+
+fn file_map_sorted(root: &Path) -> Vec<(String, u64)> {
+    let mut entries = Vec::new();
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, u64)>) {
+        let mut children: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            let path = child.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else {
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                out.push((relative, std::fs::metadata(&path).unwrap().len()));
+            }
+        }
+    }
+    walk(root, root, &mut entries);
+    entries
 }
 
 #[test]
@@ -383,7 +429,11 @@ fn relocated_bundle_builds_locked_and_serves_persistent_state() {
         ))
         .canonicalize()
         .unwrap();
-    assert!(binary.is_file(), "member binary missing: {}", binary.display());
+    assert!(
+        binary.is_file(),
+        "member binary missing: {}",
+        binary.display()
+    );
     let port = free_port();
     let log = base.path().join("service.log");
     let mut guard = spawn_service(&binary, port, &data_root, &log);
@@ -422,9 +472,45 @@ fn relocated_bundle_builds_locked_and_serves_persistent_state() {
     assert!(database.is_file(), "counter.db missing in data root");
     assert!(std::fs::metadata(&database).unwrap().len() > 0);
 
+    // Named business error without an explicit data root (V-06 negative:
+    // never an empty success; the fixture refuses instead of falling back).
+    {
+        let port3 = free_port();
+        let config = format!(
+            "{{\"profile\":\"development\",\"listen\":{{\"port\":{port3}}},\"limits\":{{\"drain_timeout_ms\":100}}}}"
+        );
+        let log_file = std::fs::File::create(base.path().join("service-neg.log")).unwrap();
+        let mut negative = Command::new(&binary)
+            .env("AUTO_HTTP_SERVICE_JSON", &config)
+            .env_remove("MEMBER_DELIVERY_DATA")
+            .stdout(Stdio::from(log_file.try_clone().unwrap()))
+            .stderr(Stdio::from(log_file))
+            .spawn()
+            .unwrap();
+        wait_ready(&mut negative, port3, 60);
+        let (status, body) = request(port3, "GET", "/counter/get", None);
+        assert_eq!(status, 200);
+        assert!(body.contains("data-root-missing"), "{body}");
+        let (status, body) = request(port3, "GET", "/value", None);
+        assert_eq!(status, 200);
+        assert_eq!(
+            body.trim(),
+            "-100",
+            "negated marker expected without data root"
+        );
+        let (status, _) = request(port3, "POST", "/__auto/shutdown", None);
+        assert_eq!(status, 202);
+        negative.wait().unwrap();
+    }
+
     // Persistence across restart: a new process reads the same state.
     let port2 = free_port();
-    let mut guard = spawn_service(&binary, port2, &data_root, &base.path().join("service2.log"));
+    let mut guard = spawn_service(
+        &binary,
+        port2,
+        &data_root,
+        &base.path().join("service2.log"),
+    );
     wait_ready(&mut guard.0, port2, 60);
     let (status, body) = request(port2, "GET", "/counter/get", None);
     assert_eq!(status, 200);

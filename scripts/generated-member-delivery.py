@@ -233,9 +233,8 @@ class Driver:
             assert status == 200 and result['ok'] and result['value'] == 7, f'A add: {result}'
             status, result = request(port, 'GET', '/counter/get')
             assert result['value'] == 7, f'A get: {result}'
-            # Named business error surface (bad input is not a silent success).
-            status, _ = request(port, 'GET', '/counter/get?token=')  # deterministic endpoint
-            assert status == 200
+            # Named business error surface without a data root is covered by
+            # the library test (fixture refuses; marker negates).
         finally:
             detail = stop_service(child, port)
         # True independent read-back: read the persisted SQLite state
@@ -298,7 +297,7 @@ class Driver:
         assert before_files == after_files, 'failed export changed delivered bundle'
         assert sha(data_root / 'counter.db') == before_counter, 'failed export touched data'
         self.record('failed-export-preserves', {'bundle_files': len(before_files),
-                                                'data': str(data_root / 'counter.txt')})
+                                                'data': str(data_root / 'counter.db')})
 
         # Recovery: restore the preserved A bundle + data backup and verify
         # independent read-back (RC-WEB-01 directory-switch recovery).
@@ -461,6 +460,10 @@ class Driver:
         document_c = json.loads((c_root / 'delivery-manifest.json').read_text())
         assert document_c['debug_policy']['label'] == 'c'
         assert '[profile.dev]' in (c_root / 'Cargo.toml').read_text()
+        # V-12 (review F-1006-R1-01): repeat export of unchanged inputs must
+        # be byte-identical to the original A bundle.
+        assert sha(c_root / 'delivery-manifest.json') == sha(
+            self.scratch / 'bundle-a' / 'delivery-manifest.json'), 'repeat export unstable'
         self.export('policy-full', project, full_root, group,
                     env_extra={'AUTO_GENERATED_DEBUG_POLICY': 'full'})
         document_f = json.loads((full_root / 'delivery-manifest.json').read_text())

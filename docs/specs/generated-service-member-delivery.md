@@ -78,10 +78,16 @@ transaction tests and recovery drills only.
 `delivery-manifest.json` records schema/version, producer HEADs (auto-lang, auto-web),
 member name, the full source closure (packages/vendor trees/root inputs), static debug
 policy, lock sha256, exporter identity, and a per-file {bytes, sha256} map with
-fingerprint. It contains no timestamps: repeated exports of unchanged inputs are
-byte-stable; observable identity changes only when real inputs change (sources, lock,
-tools, config, resources). Member receipts are sanitized in-bundle (development
-build-context anchors dropped; semantic fields kept).
+fingerprint. The bundle carries no wall-clock timestamps: member receipts are
+sanitized in-bundle (development build-context anchors AND `generated_at` /
+`created_at_ms` wall-clock fields dropped; semantic fields kept), so repeated exports
+of unchanged inputs (same project, sources, lock, registry resolution, resources) are
+byte-stable — pinned by a repeat-export identity test. Observable identity changes
+only when real inputs change (sources, lock, tools, config, resources). Producer
+revisions come from `git rev-parse HEAD`; for git-less pinned source copies (driver
+drills) a `.source-revision` marker holding the 40-hex revision the copy was taken
+from is accepted as provenance (content identity is still pinned by the per-file
+hash map; an invalid marker is a named error).
 
 ## Recovery (RC-WEB-01, first-version controlled pairs)
 
