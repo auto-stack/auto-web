@@ -70,8 +70,11 @@ def wait_http(port, path, deadline_s, log: Path, child):
 def run_service(binary: Path, port: int, env_extra, log: Path, ready_path='/value'):
     log.parent.mkdir(parents=True, exist_ok=True)
     handle = log.open('wb')
-    child = subprocess.Popen([str(binary)], env=environment(env_extra),
-                             stdout=handle, stderr=subprocess.STDOUT)
+    config = json.dumps({'profile': 'development', 'listen': {'port': port},
+                         'limits': {'drain_timeout_ms': 100}})
+    child = subprocess.Popen([str(binary)], env=environment(
+        {**env_extra, 'AUTO_HTTP_SERVICE_JSON': config}),
+        stdout=handle, stderr=subprocess.STDOUT)
     try:
         wait_http(port, ready_path, 90, log, child)
     except Exception:
@@ -109,17 +112,35 @@ class Driver:
     def command(self, name, argv, cwd, env=None, expected=0, timeout=3600):
         started = time.monotonic()
         log = self.logs / f'{name}.log'
-        with log.open('wb') as output:
-            result = subprocess.run([str(v) for v in argv], cwd=str(cwd),
-                                    env=env or environment(), stdout=output,
-                                    stderr=subprocess.STDOUT, timeout=timeout)
+        argv = [str(v) for v in argv]
+        # Loader-level failures (0xC0000135/0xC0000139 …) are observed right
+        # after the big source-copy phases (real-time scanner contention):
+        # retry with backoff before treating them as command failures.
+        # Callers pass environment EXTRAS (e.g. pinned source roots); always
+        # merge onto the scrubbed base — a bare extra dict would strip
+        # SystemRoot/PATH and the child would die in the loader.
+        child_env = environment(env)
+        for attempt in range(3):
+            with log.open('wb') as output:
+                result = subprocess.run(argv, cwd=str(cwd),
+                                        env=child_env, stdout=output,
+                                        stderr=subprocess.STDOUT, timeout=timeout)
+            if result.returncode == expected or 0 <= result.returncode < 0x80000000:
+                break
+            # Loader-level codes (0xC0000135/0xC0000139 …) can still flap
+            # while the real-time scanner is hot after big copy phases.
+            time.sleep(10)
         row = {'id': name, 'exit': result.returncode, 'expected': expected,
                'seconds': round(time.monotonic() - started, 1),
                'log': str(log), 'log_sha256': sha(log),
                'status': 'PASS' if result.returncode == expected else 'FAIL'}
         self.receipt['checks'].append(row)
         if row['status'] == 'FAIL':
-            raise ValueError(f'command failed: {name}, see {log}')
+            detail = log.read_text(encoding='utf-8', errors='replace')[-2000:]
+            raise ValueError(
+                f'command failed: {name} exit={result.returncode} '
+                f'argv={argv} env_keys={sorted(k for k in (env or environment()) if k.startswith("AUTO"))} '
+                f'see {log} :: tail: {detail!r}')
         return log
 
     def record(self, name, detail):
@@ -135,8 +156,12 @@ class Driver:
 
     def pin_sources(self, group: Path):
         for name, source in (('auto-lang', self.lang_source), ('auto-web', self.web_source)):
+            revision = subprocess.check_output(
+                ['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
             destination = group / name
             destination.mkdir(parents=True)
+            (destination / '.source-revision').write_text(
+                revision + chr(10), encoding='utf-8', newline=chr(10))
             for entry in source.iterdir():
                 if entry.name in {'.git', 'target', 'node_modules', '__pycache__'}:
                     continue
@@ -158,8 +183,15 @@ class Driver:
         return document
 
     def build_locked(self, name, bundle: Path):
-        self.command(f'{name}-fresh-locked-build',
-                     ['cargo', 'build', '--locked', '-j', '4'], bundle)
+        # Prefer the local registry cache (--offline is immune to mirror
+        # flakiness); when the lockgen picked cache-absent versions, fall
+        # back to the networked build for the same locked inputs.
+        try:
+            self.command(f'{name}-fresh-locked-build',
+                         ['cargo', 'build', '--locked', '--offline', '-j', '4'], bundle)
+        except ValueError:
+            self.command(f'{name}-fresh-locked-build-online',
+                         ['cargo', 'build', '--locked', '-j', '4'], bundle)
         return json.loads((bundle / 'delivery-manifest.json').read_text(encoding='utf-8'))['member']['name']
 
     def service_binary(self, bundle: Path, member: str) -> Path:
@@ -206,18 +238,29 @@ class Driver:
             assert status == 200
         finally:
             detail = stop_service(child, port)
-        assert (data_root / 'counter.txt').read_text().strip() == '7', 'independent read-back differs'
+        # True independent read-back: read the persisted SQLite state
+        # directly, outside the service.
+        import sqlite3
+        database = data_root / 'counter.db'
+        connection = sqlite3.connect(f'file:{database}?mode=ro', uri=True)
+        try:
+            rows = connection.execute('SELECT value FROM counter WHERE id=1').fetchall()
+        finally:
+            connection.close()
+        assert rows == [('7',)], f'independent sqlite read: {rows}'
         self.record('a-real-state', {'http': '/value,/counter/add,/counter/get',
-                                     'independent_read': str(data_root / 'counter.txt'), **detail})
+                                     'independent_read': str(database),
+                                     'independent_value': rows[0][0], **detail})
         return member
 
-    def phase_b_upgrade_and_recovery(self, consumer: Path, data_root: Path, member_a: str, group: Path):
+    def phase_b_upgrade_and_recovery(self, consumer: Path, data_root: Path, member_a: str, group: Path, bundle_b: Path):
         # Backup A's data, swap the delivered directory A -> B (directory-level
         # replace with preservation; user data lives outside the bundle).
         data_backup = self.scratch / 'data-before-upgrade'
         shutil.copytree(data_root, data_backup)
         preserved_a = self.scratch / 'preserved-bundle-a'
         shutil.move(str(consumer), str(preserved_a))
+        shutil.copytree(bundle_b, consumer)
         member_b = self.build_locked('b', consumer)
         port = free_port()
         child = self.consume('b', consumer, member_b, port, data_root)
@@ -229,15 +272,22 @@ class Driver:
             assert result['ok'] and result['value'] == 14, f'B double on A data: {result}'
         finally:
             detail = stop_service(child, port)
-        assert (data_root / 'counter.txt').read_text().strip() == '14'
-        self.record('b-reads-a-data', {'value_marker': 200, 'doubled': 14, **detail})
+        import sqlite3 as _sqlite3
+        connection = _sqlite3.connect(f'file:{data_root / "counter.db"}?mode=ro', uri=True)
+        try:
+            rows = connection.execute('SELECT value FROM counter WHERE id=1').fetchall()
+        finally:
+            connection.close()
+        assert rows == [('14',)], f'B read of A data: {rows}'
+        self.record('b-reads-a-data', {'value_marker': 200, 'doubled': 14,
+                                       'independent_value': rows[0][0], **detail})
 
         # Failed B re-export (swap fail-point) must keep the delivered bundle
         # and the data byte-identical; error names the preserved artifacts.
         before_files = {str(p.relative_to(consumer)): sha(p)
                         for p in consumer.rglob('*') if p.is_file()
                         and 'target' not in p.parts}
-        before_counter = sha(data_root / 'counter.txt')
+        before_counter = sha(data_root / 'counter.db')
         self.command('failed-b-export', [self.binary, 'service-export',
                      '--dir', self.scratch / 'project-b', '--delivery-root', consumer],
                      self.scratch, {**self.pinned_env(group),
@@ -246,7 +296,7 @@ class Driver:
                        for p in consumer.rglob('*') if p.is_file()
                        and 'target' not in p.parts}
         assert before_files == after_files, 'failed export changed delivered bundle'
-        assert sha(data_root / 'counter.txt') == before_counter, 'failed export touched data'
+        assert sha(data_root / 'counter.db') == before_counter, 'failed export touched data'
         self.record('failed-export-preserves', {'bundle_files': len(before_files),
                                                 'data': str(data_root / 'counter.txt')})
 
@@ -267,8 +317,15 @@ class Driver:
             assert result['value'] == 7, f'recovered A state: {result}'
         finally:
             detail = stop_service(child, port)
-        assert (data_root / 'counter.txt').read_text().strip() == '7'
-        self.record('recovered-a-reads-backup', {'counter': 7, **detail})
+        import sqlite3 as _s3
+        connection = _s3.connect(f'file:{data_root / "counter.db"}?mode=ro', uri=True)
+        try:
+            rows = connection.execute('SELECT value FROM counter WHERE id=1').fetchall()
+        finally:
+            connection.close()
+        assert rows == [('7',)], f'recovered independent read: {rows}'
+        self.record('recovered-a-reads-backup', {'counter': 7,
+                                                  'independent_value': rows[0][0], **detail})
 
     def phase_unreachable_roots(self, group: Path, bundle: Path):
         # The pinned owned source copies are removed entirely; the relocated
@@ -288,17 +345,23 @@ class Driver:
         self.record('original-roots-unreachable', {'removed': str(group),
                                                    'scanned_manifests': len(text_files)})
         member = json.loads((consumer2 / 'delivery-manifest.json').read_text())['member']['name']
-        self.command('relocated-locked-build', ['cargo', 'build', '--locked', '-j', '4'], consumer2)
+        try:
+            self.command('relocated-locked-build',
+                         ['cargo', 'build', '--locked', '--offline', '-j', '4'], consumer2)
+        except ValueError:
+            self.command('relocated-locked-build-online',
+                         ['cargo', 'build', '--locked', '-j', '4'], consumer2)
         port = free_port()
         data_root = self.scratch / 'data-relocated'
         data_root.mkdir()
         child = self.consume('relocated', consumer2, member, port, data_root)
         try:
             status, value = request(port, 'GET', '/value')
-            assert status == 200 and value == 100
+            # The relocated bundle is fixture B: its version marker is 200.
+            assert status == 200 and value == 200, f'relocated /value: {status} {value}'
         finally:
             detail = stop_service(child, port)
-        self.record('relocated-service', detail)
+        self.record('relocated-service', {'value': value, **detail})
 
     def phase_chat(self, group: Path):
         if not self.chat:
@@ -366,8 +429,9 @@ class Driver:
                       '--out', seed_dir], self.scratch)
         basic = seed_dir / 'basic_a.db'
         port = free_port()
-        child = run_service(self.service_binary(bundle, member), port, {},
-                            self.logs / 'database.log', ready_path='/api/probe/ping')
+        child = run_service(self.service_binary(bundle, member), port,
+                            {'AUTO_DB_PROBE': '1'},
+                            self.logs / 'database.log', ready_path='/api/probe/open_missing')
         try:
             status, opened = request(port, 'POST', '/api/db/open', {'path': str(basic)})
             assert opened['ok'] and opened['tables'] >= 4, f'db open: {opened}'
@@ -436,6 +500,9 @@ class Driver:
             raise ValueError(f'--binary must be a built auto CLI: {self.binary}')
         group = self.scratch / 'tool'
         self.pin_sources(group)
+        # Preflight the CLI in the exact environment the phases use.
+        self.command('cli-preflight', [self.binary, '--version'], self.scratch,
+                     self.pinned_env(group))
         bundles = self.phase_ab_bundles(group)
         # Consumer home is fully independent of the export roots.
         consumer = self.scratch / 'consumer'
@@ -443,7 +510,7 @@ class Driver:
         data_root = self.scratch / 'data-root'
         data_root.mkdir()
         member_a = self.phase_a_state(consumer, data_root)
-        self.phase_b_upgrade_and_recovery(consumer, data_root, member_a, group)
+        self.phase_b_upgrade_and_recovery(consumer, data_root, member_a, group, bundles['b'])
         self.phase_unreachable_roots(group, bundles['b'])
         # After phase_unreachable_roots removed `group`, re-pin for the
         # remaining export phases.

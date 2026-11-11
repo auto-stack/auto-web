@@ -44,7 +44,10 @@ pub fn value() int { 890 }
     auto_web::generate_api(&project, "rust").unwrap();
     assert!(auto_web::backend_generation_is_fresh(&project));
     let workspace = auto_web::rust_workspace::resolve_rust_workspace_dir(&project);
-    let member = auto_web::rust_workspace::back_member_name(&project);
+    let member = auto_web::rust_workspace::generated_build::member_dir_name(
+        &project,
+        auto_web::rust_workspace::generated_build::MemberRole::Back,
+    );
     let manifest = workspace.join("Cargo.toml");
     let before = std::fs::read(&manifest).unwrap();
     std::env::set_var("AUTO_WEB_ROOT", dir.path().join("absent"));

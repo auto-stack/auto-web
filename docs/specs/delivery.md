@@ -21,6 +21,16 @@ prepare/verify/swap failure; successful upgrade is followed by actual read/execu
 Service generation accepts Web minimal SDK and valid Man Core/Full; UI requires
 Full. The old architecture recovery claim is its genuine Core shape, not old UI/Full.
 
+## Member export (PLAN-1006) — distinct from SDK delivery
+
+This spec covers whole-SDK source/install delivery (`web-install.py`). Individual
+generated service members are exported as relocatable self-contained bundles through a
+separate public contract — `auto service-export` over
+`auto_web::delivery::export_rust_service` — specified in
+[generated-service-member-delivery.md](generated-service-member-delivery.md). Member
+export reuses the same source-selection and fail-closed rules but ships one member's
+build closure, not the SDK install layout, and does not run or replace this installer.
+
 ## Evidence and limits
 
 Earlier verified work evidence: actual independent SDK library217passed/two original

@@ -183,12 +183,28 @@ fn git_head(root: &Path) -> AutoResult<String> {
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|e| format!("git rev-parse 失败 {}: {e}", root.display()))?;
-    if !output.status.success() {
-        return Err(format!("无法确定源版本（git HEAD）: {}", root.display()).into());
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        }
+        _ => {}
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    // Pinned source copies (driver drills) carry no .git; their provenance
+    // marker records the revision the copy was taken from. Content identity
+    // is still pinned by the manifest's per-file hash map.
+    if let Ok(marker) = fs::read_to_string(root.join(".source-revision")) {
+        let revision = marker.trim();
+        if revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(revision.to_string());
+        }
+        return Err(format!(
+            "源版本标记无效（.source-revision）: {}",
+            root.display()
+        )
+        .into());
+    }
+    Err(format!("无法确定源版本（git HEAD / .source-revision）: {}", root.display()).into())
 }
 
 fn plan_export(req: &ServiceExportRequest) -> AutoResult<ExportPlan> {
