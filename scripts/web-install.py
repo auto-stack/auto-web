@@ -61,11 +61,14 @@ def validate_packages(packages):
         name = package['name']
         # PLAN-906: auto-web-contract 单源迁语言仓——receipt owner 随源树翻转。
         owner = 'auto-web' if name == 'auto-web' else 'auto-lang'
-        if name == 'ace-semantics-contract':
-            # Non-crates whitelist entry (fix-989-sdk-staging): same-shape
-            # mirrored standalone workspace; all other rules below apply.
+        if name in ('ace-semantics-contract', 'autodown-test-parser'):
+            # Non-crates whitelist entries (fix-989-sdk-staging): same-shape
+            # mirrored standalone workspaces from the language producer.
+            allowed = ('experimental/ace/crates/semantics-contract'
+                       if name == 'ace-semantics-contract'
+                       else 'vendor/autodown-test-parser')
             if (package['source_repo'] != 'auto-lang'
-                    or package['source_path'] != 'experimental/ace/crates/semantics-contract'
+                    or package['source_path'] != allowed
                     or package['installed_path'] != package['source_path']):
                 raise ValueError('invalid standalone package owner/path: ' + name)
             continue
@@ -120,7 +123,12 @@ def stage_source(output):
             # non-optional dependency of auto-lang-core at a non-crates
             # layout; mirror it same-shape into the sdk (standalone
             # workspace — not a projected member). fix-989-sdk-staging.
-            if relative.as_posix() == 'experimental/ace/crates/semantics-contract':
+            if relative.as_posix() in ('experimental/ace/crates/semantics-contract',
+                                        'vendor/autodown-test-parser'):
+                # Non-crates standalone workspaces: PLAN-944 semantics-contract
+                # (non-optional dep of auto-lang-core) and the PLAN-901 vendored
+                # parser (via auto-test-case). Mirror same-shape; not projected
+                # members. fix-989-sdk-staging.
                 destination = sdk / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 OWNER.clean_tree(source, destination)
