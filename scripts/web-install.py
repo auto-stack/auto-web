@@ -242,8 +242,15 @@ def verify_install(root):
                 'licenses/auto-web/LICENSE', 'licenses/auto-lang/LICENSE'}
     if not required.issubset(actual):
         raise ValueError('required Web tool/source/resource/license missing')
-    if any(p.startswith(('sdk/crates/auto-ui', 'sdk/crates/auto-man', 'sdk/crates/auto-lang/')) for p in actual):
-        raise ValueError('forbidden UI/Man/facade source in Web install')
+    forbidden = [p for p in actual
+                 if p.startswith(('sdk/crates/auto-ui', 'sdk/crates/auto-man'))
+                 # The facade CRATE stays forbidden; its test-cases corpus is
+                 # a compile-time include input of auto-lang-core, not the
+                 # facade package (fix-989-sdk-staging).
+                 or p == 'sdk/crates/auto-lang/Cargo.toml'
+                 or p.startswith('sdk/crates/auto-lang/src')]
+    if forbidden:
+        raise ValueError('forbidden UI/Man/facade source in Web install: ' + ', '.join(forbidden[:3]))
     producer = document['runtime_producer']
     if producer['binary_sha256'] != actual[OWNER.exe('auto-web')]['sha256'] or producer['sources'] != document['sources']:
         raise ValueError('runtime producer identity differs')
