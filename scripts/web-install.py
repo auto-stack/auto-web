@@ -161,10 +161,14 @@ def stage_source(output):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(lang / relative, destination)
     OWNER.clean_tree(lang / 'vendor/autodown-test-parser', sdk / 'vendor/autodown-test-parser')
+    # UI example fixtures follow the auto-ui PLAN-007 relocation (2026-11-02):
+    # the managed examples live in the sibling auto-ui checkout, byte-identical
+    # to their pre-relocation auto-lang content (per-file SHA manifest).
+    ui_repo = lang.parent / 'auto-ui'
     for example in ('015-notes', '017-chat', '023-realworld'):
         base = Path('examples/ui') / example
-        OWNER.clean_tree(lang / base / 'src/back', sdk / base / 'src/back')
-        shutil.copy2(lang / base / 'pac.at', sdk / base / 'pac.at')
+        OWNER.clean_tree(ui_repo / base / 'src/back', sdk / base / 'src/back')
+        shutil.copy2(ui_repo / base / 'pac.at', sdk / base / 'pac.at')
     for name, source in [('auto-lang', lang), ('auto-web', ROOT)]:
         destination = output / 'licenses' / name
         destination.mkdir(parents=True)
