@@ -1,0 +1,39 @@
+// PLAN-1006 member-delivery fixture B（版本 B，同 schema 升级版）：/value 版本
+// 标记 200（A 为 100），新增 /counter/double 端点演进；counter.db 与 A 同
+// schema——B 直接读 A 写入的数据。
+pub type CounterResult = { ok: bool, err: str, value: int }
+
+#[api(method = "GET", path = "/value")]
+pub fn value() int {
+    let marker int = store.version_marker()
+    if store.data_root() == "" {
+        return 0 - marker
+    }
+    return marker
+}
+
+#[api(method = "POST", path = "/counter/add")]
+pub fn counter_add(delta int) CounterResult {
+    if store.data_root() == "" {
+        return CounterResult { ok: false, err: "data-root-missing", value: 0 }
+    }
+    let next int = store.add_counter(delta)
+    return CounterResult { ok: true, err: "", value: next }
+}
+
+#[api(method = "POST", path = "/counter/double")]
+pub fn counter_double() CounterResult {
+    if store.data_root() == "" {
+        return CounterResult { ok: false, err: "data-root-missing", value: 0 }
+    }
+    let next int = store.double_counter()
+    return CounterResult { ok: true, err: "", value: next }
+}
+
+#[api(method = "GET", path = "/counter/get")]
+pub fn counter_get() CounterResult {
+    if store.data_root() == "" {
+        return CounterResult { ok: false, err: "data-root-missing", value: 0 }
+    }
+    return CounterResult { ok: true, err: "", value: store.read_counter() }
+}

@@ -1,0 +1,29 @@
+// PLAN-1006 member-delivery fixture A（版本 A）：真实状态端点（SQLite 持久化，
+// 业务在伴生 store 模块；本文件只声明 API 合同）。
+pub type CounterResult = { ok: bool, err: str, value: int }
+
+#[api(method = "GET", path = "/value")]
+pub fn value() int {
+    let marker int = store.version_marker()
+    if store.data_root() == "" {
+        return 0 - marker
+    }
+    return marker
+}
+
+#[api(method = "POST", path = "/counter/add")]
+pub fn counter_add(delta int) CounterResult {
+    if store.data_root() == "" {
+        return CounterResult { ok: false, err: "data-root-missing", value: 0 }
+    }
+    let next int = store.add_counter(delta)
+    return CounterResult { ok: true, err: "", value: next }
+}
+
+#[api(method = "GET", path = "/counter/get")]
+pub fn counter_get() CounterResult {
+    if store.data_root() == "" {
+        return CounterResult { ok: false, err: "data-root-missing", value: 0 }
+    }
+    return CounterResult { ok: true, err: "", value: store.read_counter() }
+}

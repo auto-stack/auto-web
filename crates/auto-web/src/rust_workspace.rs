@@ -4,7 +4,9 @@ pub use auto_generation_core::rust_workspace::*;
 use auto_val::AutoResult;
 use std::path::{Path, PathBuf};
 
-fn web_source() -> AutoResult<PathBuf> {
+/// Validated Web producer crate source (PLAN-1006: also the delivery
+/// exporter's web closure root — same selection contract, never rewritten).
+pub(crate) fn web_source() -> AutoResult<PathBuf> {
     let root = if let Some(explicit) = std::env::var_os("AUTO_WEB_ROOT") {
         PathBuf::from(explicit)
     } else if let Some(installed) = std::env::current_exe().ok().and_then(|exe| {

@@ -12,6 +12,7 @@ pub mod api {
 }
 pub mod api_gen;
 mod api_targets;
+pub mod delivery;
 pub use api_gen::{backend_generation_is_fresh, generate_api};
 pub use auto_generation_core::{shared_generation, sidecar, source_owner};
 pub mod rust_workspace;

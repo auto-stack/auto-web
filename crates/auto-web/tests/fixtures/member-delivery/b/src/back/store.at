@@ -1,0 +1,81 @@
+// PLAN-1006 member-delivery 持久化伴生模块（chat repository.at 同款机制：
+// sqlite.open/exec/query + 手写 parse_int + str_of SQL 拼接）。
+// 数据根只来自显式 MEMBER_DELIVERY_DATA（缺失由 API 层给出可识别错误；
+// 绝不回退 HOME/APPDATA）。counter 表 schema 与 A/B 两版同构（id=1 单行 TEXT）。
+/// 版本标记（A=100 / B=200）：升级后可观察的行为差异。
+pub fn version_marker() int {
+    var marker int = 200
+    return marker
+}
+
+pub fn data_root() str {
+    return Env.get("MEMBER_DELIVERY_DATA")
+}
+
+pub fn db_path() str {
+    return data_root() + "/counter.db"
+}
+
+/// 严格整数十进制解析（TEXT 列读回；chat parse_int 同款）。
+pub fn parse_int(s str) int {
+    var r int = 0
+    var neg bool = false
+    var i int = 0
+    var n int = s.len()
+    if n > 0 {
+        var c0 int = s.char_at(0)
+        if c0 == 45 {
+            neg = true
+            i = 1
+        }
+    }
+    while i < n {
+        var cp int = s.char_at(i)
+        if cp != 0 {
+            if cp >= 48 {
+                if cp <= 57 {
+                    r = r * 10 + cp - 48
+                }
+            }
+        }
+        i = i + 1
+    }
+    if neg {
+        r = 0 - r
+    }
+    return r
+}
+
+fn str_of(n int) str {
+    return n.to_string()
+}
+
+pub fn read_counter() int {
+    fs.mkdir_all(data_root())
+    var db SqliteDb = sqlite.open(db_path())
+    db.exec("CREATE TABLE IF NOT EXISTS counter(id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)")
+    var rows List<List<str>> = db.query("SELECT COALESCE((SELECT value FROM counter WHERE id=1), '0')")
+    if rows.len() == 0 {
+        return 0
+    }
+    var row List<str> = rows[0]
+    return parse_int(row[0])
+}
+
+pub fn add_counter(delta int) int {
+    fs.mkdir_all(data_root())
+    var db SqliteDb = sqlite.open(db_path())
+    db.exec("CREATE TABLE IF NOT EXISTS counter(id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)")
+    db.exec("INSERT INTO counter(id, value) VALUES(1, '0') ON CONFLICT(id) DO NOTHING")
+    db.exec("UPDATE counter SET value = CAST(CAST(value AS INTEGER) + " + str_of(delta) + " AS TEXT) WHERE id=1")
+    return read_counter()
+}
+
+pub fn double_counter() int {
+    fs.mkdir_all(data_root())
+    var db SqliteDb = sqlite.open(db_path())
+    db.exec("CREATE TABLE IF NOT EXISTS counter(id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)")
+    db.exec("INSERT INTO counter(id, value) VALUES(1, '0') ON CONFLICT(id) DO NOTHING")
+    db.exec("UPDATE counter SET value = CAST(CAST(value AS INTEGER) * 2 AS TEXT) WHERE id=1")
+    return read_counter()
+}

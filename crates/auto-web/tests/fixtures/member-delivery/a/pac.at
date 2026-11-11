@@ -1,0 +1,4 @@
+name: "member-delivery-a"
+version: "1.0.0"
+scene: "workspace"
+api: "rust"
