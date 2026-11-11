@@ -157,14 +157,9 @@ def stage_source(output):
     workspace, count = re.subn(r'(?ms)^members = \[.*?^\]', 'members = [' + members + ']', workspace, count=1)
     if count != 1:
         raise ValueError('language workspace member projection failed')
-    if standalone:
-        # Inject into the existing [workspace] table (right after members):
-        # a second [workspace] table would be invalid TOML.
-        workspace, count = re.subn(r'(?m)^(members = \[.*\])$',
-                                   r'\1\nexclude = [' + ', '.join(json.dumps(s) for s in standalone) + ']',
-                                   workspace, count=1)
-        if count != 1:
-            raise ValueError('standalone exclude injection failed')
+    # No exclude injection: the language root's own exclude list already
+    # covers the standalone trees (test/fixtures, experimental/**, the
+    # vendored parser), and a second exclude key would be invalid TOML.
     workspace = workspace.split('[patch.crates-io]', 1)[0].rstrip()
     workspace += '\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2021"\nlicense = "MIT"\n'
     (sdk / 'Cargo.toml').write_text(workspace, encoding='utf-8', newline='\n')
