@@ -146,10 +146,25 @@ def stage_source(output):
         packages.append({'name': package['name'], 'source_repo': owner,
                          'source_path': relative.as_posix(), 'installed_path': relative.as_posix()})
     workspace = (lang / 'Cargo.toml').read_text()
-    members = ', '.join(json.dumps(p['installed_path']) for p in sorted(packages, key=lambda p: p['name']))
+    # Non-crates standalone workspaces (semantics-contract, vendored parser)
+    # are path dependencies, never projected members — exclude them like the
+    # language root does. fix-989-sdk-staging.
+    standalone = sorted(p['installed_path'] for p in packages
+                        if p['installed_path'].startswith(('experimental/', 'vendor/')))
+    standalone_set = set(standalone)
+    members = ', '.join(json.dumps(p['installed_path']) for p in sorted(packages, key=lambda p: p['name'])
+                        if p['installed_path'] not in standalone_set)
     workspace, count = re.subn(r'(?ms)^members = \[.*?^\]', 'members = [' + members + ']', workspace, count=1)
     if count != 1:
         raise ValueError('language workspace member projection failed')
+    if standalone:
+        # Inject into the existing [workspace] table (right after members):
+        # a second [workspace] table would be invalid TOML.
+        workspace, count = re.subn(r'(?m)^(members = \[.*\])$',
+                                   r'\1\nexclude = [' + ', '.join(json.dumps(s) for s in standalone) + ']',
+                                   workspace, count=1)
+        if count != 1:
+            raise ValueError('standalone exclude injection failed')
     workspace = workspace.split('[patch.crates-io]', 1)[0].rstrip()
     workspace += '\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2021"\nlicense = "MIT"\n'
     (sdk / 'Cargo.toml').write_text(workspace, encoding='utf-8', newline='\n')
