@@ -171,6 +171,17 @@ def stage_source(output):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(lang / relative, destination)
     OWNER.clean_tree(lang / 'vendor/autodown-test-parser', sdk / 'vendor/autodown-test-parser')
+    # Compile-time inputs the closure embeds via include_str! (PLAN-1003 T-05
+    # stdlib contracts; PLAN-888/ACE-M1 facade test-cases corpus) — required
+    # since auto-lang-core gained them; surfaced by PLAN-1006's member
+    # delivery closure work. fix-989-sdk-staging.
+    for contracts in ('stdlib/contracts/operations.toml',
+                      'stdlib/contracts/compatibility.toml'):
+        destination = sdk / contracts
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(lang / contracts, destination)
+    OWNER.clean_tree(lang / 'crates/auto-lang/test/cases',
+                     sdk / 'crates/auto-lang/test/cases')
     # UI example fixtures follow the auto-ui PLAN-007 relocation (2026-11-02):
     # the managed examples live in the sibling auto-ui checkout, byte-identical
     # to their pre-relocation auto-lang content (per-file SHA manifest).
