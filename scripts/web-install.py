@@ -61,6 +61,14 @@ def validate_packages(packages):
         name = package['name']
         # PLAN-906: auto-web-contract 单源迁语言仓——receipt owner 随源树翻转。
         owner = 'auto-web' if name == 'auto-web' else 'auto-lang'
+        if name == 'ace-semantics-contract':
+            # Non-crates whitelist entry (fix-989-sdk-staging): same-shape
+            # mirrored standalone workspace; all other rules below apply.
+            if (package['source_repo'] != 'auto-lang'
+                    or package['source_path'] != 'experimental/ace/crates/semantics-contract'
+                    or package['installed_path'] != package['source_path']):
+                raise ValueError('invalid standalone package owner/path: ' + name)
+            continue
         if (package['source_repo'] != owner or package['source_path'] != 'crates/' + name
                 or package['installed_path'] != 'crates/' + name
                 or name.startswith(('auto-ui', 'auto-man')) or name in ('tauri', 'auto-lang', 'auto-api-gen')):
@@ -108,6 +116,17 @@ def stage_source(output):
             raise ValueError('foreign local source: ' + str(source))
         relative = source.relative_to(ROOT if owner == 'auto-web' else lang)
         if relative.parts != ('crates', package['name']):
+            # PLAN-944 (2026-11-06) added ace-semantics-contract as a
+            # non-optional dependency of auto-lang-core at a non-crates
+            # layout; mirror it same-shape into the sdk (standalone
+            # workspace — not a projected member). fix-989-sdk-staging.
+            if relative.as_posix() == 'experimental/ace/crates/semantics-contract':
+                destination = sdk / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                OWNER.clean_tree(source, destination)
+                packages.append({'name': package['name'], 'source_repo': owner,
+                                 'source_path': relative.as_posix(), 'installed_path': relative.as_posix()})
+                continue
             raise ValueError('unexpected local package layout: ' + str(source))
         destination = sdk / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
