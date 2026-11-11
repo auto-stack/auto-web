@@ -127,11 +127,13 @@ def stage_source(output):
                                         'vendor/autodown-test-parser'):
                 # Non-crates standalone workspaces: PLAN-944 semantics-contract
                 # (non-optional dep of auto-lang-core) and the PLAN-901 vendored
-                # parser (via auto-test-case). Mirror same-shape; not projected
-                # members. fix-989-sdk-staging.
-                destination = sdk / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                OWNER.clean_tree(source, destination)
+                # parser (via auto-test-case). Not projected members; the
+                # parser is already staged wholesale below, semantics-contract
+                # mirrors here same-shape. fix-989-sdk-staging.
+                if relative.as_posix() == 'experimental/ace/crates/semantics-contract':
+                    destination = sdk / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    OWNER.clean_tree(source, destination)
                 packages.append({'name': package['name'], 'source_repo': owner,
                                  'source_path': relative.as_posix(), 'installed_path': relative.as_posix()})
                 continue
